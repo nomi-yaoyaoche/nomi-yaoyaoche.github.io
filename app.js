@@ -16,14 +16,14 @@
    * 1. 歌曲数据
    * ------------------------------------------------------------------ */
   const SONGS = {
-    family: {
-      id: 'family',
-      title: '家庭礼貌称呼歌',
-      subtitle: '爸爸的爸爸叫什么',
-      emoji: '🧓',
-      src: 'assets/jiating-limao-chenghu-ge.mp3',
-      durationLabel: '2:08',
-      nomi: 'NOMI：投币成功！这首是祖传提问，80 正常摇，120 全小区一起回答。'
+    nomi: {
+      id: 'nomi',
+      title: 'NOMI 摇摇车',
+      subtitle: '原创歌曲 · 摇摇车主题曲',
+      emoji: '🚗',
+      src: 'assets/nomi-yaoyaoche.mp3',
+      durationLabel: '2:44',
+      nomi: 'NOMI：原创主题曲《NOMI 摇摇车》已就位，投币就开摇！'
     },
     baby: {
       id: 'baby',
@@ -61,7 +61,7 @@
   const STORE_KEY = 'nomi-yaoyaoche-v3';
   const state = {
     phase: 'idle',          // idle | riding
-    selectedSongId: 'family',
+    selectedSongId: 'nomi',
     playing: false,
     speed: NORMAL_SPEED,
     rate: 1,
@@ -122,6 +122,7 @@
       if (Number.isFinite(data.speed)) state.speed = clamp(data.speed, SPEED_MIN, SPEED_MAX);
       if (Number.isFinite(data.safeBottom)) state.safeBottom = clamp(Math.round(data.safeBottom), 0, 240);
       if (data.gpsWorked === true) state.gpsWorked = true;
+      if (data.selectedSongId === 'family') data.selectedSongId = 'nomi'; // 兼容旧缓存
       if (data.selectedSongId && SONGS[data.selectedSongId]) state.selectedSongId = data.selectedSongId;
       if (data.usage && typeof data.usage === 'object') {
         ['opens', 'opensToday', 'rides', 'ridesToday'].forEach((key) => {
@@ -1081,8 +1082,9 @@
 
   function formatTime(seconds) {
     if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
-    const s = Math.floor(seconds % 60).toString().padStart(2, '0');
-    return Math.floor(seconds / 60) + ':' + s;
+    const total = Math.round(seconds);
+    const s = (total % 60).toString().padStart(2, '0');
+    return Math.floor(total / 60) + ':' + s;
   }
 
   /* ------------------------------------------------------------------ *
@@ -1176,6 +1178,7 @@
     window.NOMI_YAOYAOCHE = {
       setSpeed(kmh) { setSpeed(kmh); },
       play(songId) {
+        if (songId === 'family') songId = 'nomi'; // 兼容旧调用
         if (songId && SONGS[songId]) state.selectedSongId = songId;
         renderSong();
         if (state.phase === 'riding') startAudio();
