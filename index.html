@@ -7,7 +7,7 @@
 <title>NOMI 摇摇车 · 投币开摇（蔚来车机 16:9 / 9:10）</title>
 <meta name="description" content="蔚来车机摇摇车：投币开摇，摇动速度随车速变化，MP3 原声按车速变速，不玩了就回家。" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230a63d8'/%3E%3Ccircle cx='32' cy='26' r='13' fill='%23fff'/%3E%3Ccircle cx='27' cy='25' r='3' fill='%230a63d8'/%3E%3Ccircle cx='37' cy='25' r='3' fill='%230a63d8'/%3E%3Cpath d='M25 32c4 4 10 4 14 0' stroke='%230a63d8' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3Crect x='12' y='42' width='40' height='12' rx='6' fill='%23ffd166' stroke='%2317223f' stroke-width='3'/%3E%3C/svg%3E" />
-<link rel="stylesheet" href="style.css" />
+<link rel="stylesheet" href="style.css?v=20261020-2" />
 </head>
 <body class="app-body phase-idle">
   <div class="app">
@@ -40,9 +40,14 @@
       <!-- ---------- 第一段：摇摇车 ---------- -->
       <section class="ride-stage" id="rideStage" aria-label="第一段：摇摇车">
         <div class="ride-head">
+          <button class="gps-btn" id="gpsBtn" type="button" aria-pressed="false" title="开启 / 关闭 GPS 车速定位">
+            <span class="gps-dot" aria-hidden="true"></span>
+            <span class="gps-label" id="gpsLabel">GPS 未开启</span>
+          </button>
           <span class="seg-badge">01</span>
           <span class="seg-title">摇摇车</span>
           <span class="ride-speed-hint" id="rideSpeedHint">摇动速度 · 80 km/h</span>
+          <button class="stop-btn" id="stopBtn" type="button">🏠 不玩了，我要回家</button>
         </div>
 
         <!-- 未投币：投币台 -->
@@ -59,7 +64,7 @@
         </div>
 
         <!-- 已投币：摇摇车 + 停止按钮 -->
-        <div class="ride-live" id="rideLive" aria-hidden="true">
+        <div class="ride-live" id="rideLive">
           <div class="nomi-bubble">
             <span class="nomi-mini"><i></i><i></i></span>
             <p id="nomiLine">NOMI：投币成功，我要开始摇啦！</p>
@@ -119,8 +124,6 @@
               <text class="ride-base-label" x="280" y="355" text-anchor="middle">NIO 摇摇车</text>
             </g>
           </svg>
-
-          <button class="stop-btn" id="stopBtn" type="button">🏠 不玩了，我要回家</button>
         </div>
       </section>
 
@@ -162,7 +165,6 @@
         <div class="speed-controls">
           <input class="speed-range" id="speedRange" type="range" min="0" max="140" step="1" value="80" aria-label="模拟车速（km/h）" />
           <div class="speed-actions">
-            <button class="mini-btn" id="gpsBtn" type="button" aria-pressed="false">📡 GPS</button>
             <button class="mini-btn" id="autoBtn" type="button" aria-pressed="false">▶ 巡航</button>
             <button class="mini-btn" id="resetBtn" type="button">回到 80</button>
           </div>
@@ -239,7 +241,7 @@
         <p>MP3 使用浏览器保调变速（preservesPitch）：只变节奏、不变调，避免“花栗鼠音”。</p>
 
         <h3>🛰️ 车速从哪来？</h3>
-        <p>浏览器不能直接读取车辆 CAN 车速，页面提供三种方式：滑杆/自动巡航模拟；「GPS 测速」用定位估算真实车速（需 HTTPS 或 localhost 并授权定位）；原生车机可调 <code>NOMI_YAOYAOCHE.setSpeed(kmh)</code> 注入真实车速。</p>
+        <p>浏览器不能直接读取车辆 CAN 车速，页面提供三种方式：滑杆/自动巡航模拟；GPS 定位测速（需 HTTPS 或 localhost 并授权定位，已有定位权限时页面会自动保持 GPS 开启，也可点左上角「GPS」按钮手动开关）；原生车机可调 <code>NOMI_YAOYAOCHE.setSpeed(kmh)</code> 注入真实车速。</p>
 
         <h3>🎵 素材 &amp; 比例</h3>
         <p>MP3 由用户提供：《家庭礼貌称呼歌》《宝贝宝贝（贝瓦儿歌）》，版权归原权利人，本页仅本地播放演示。布局已适配 16:9 横屏与 9:10 竖屏，其他比例自动回退为可滚动布局。</p>
@@ -260,13 +262,14 @@
       <span class="debug-mode-title">驾驶模式</span>
       <label class="debug-toggle"><input type="checkbox" id="walkToggle" /> 步行测试</label>
       <label class="debug-factor">倍率 <input id="walkFactorInput" type="number" min="2" max="100" step="1" value="25" /></label>
+      <label class="debug-factor">底部安全区 <input id="safeBottomInput" type="number" min="0" max="240" step="2" value="0" /> px</label>
     </div>
     <dl class="debug-body" id="debugBody"></dl>
-    <p class="debug-tip">默认车辆模式（真实车速）。勾选「步行测试」后，GPS 实际车速 × 倍率 作为等效车速；截图这一屏发给开发者，可按实际视口精调。</p>
+    <p class="debug-tip">默认车辆模式（真实车速）。勾选「步行测试」后，GPS 实际车速 × 倍率 作为等效车速。若车机浏览器上下栏遮挡页面，调大「底部安全区」直到一屏完整；调好会自动记住。截图这一屏发给开发者，可按实际视口精调。</p>
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="app.js" defer></script>
+  <script src="app.js?v=20261020-2" defer></script>
 </body>
 </html>

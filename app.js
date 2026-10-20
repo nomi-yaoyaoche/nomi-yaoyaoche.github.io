@@ -76,6 +76,14 @@
     gpsSpeed: null,
     gpsErrorCount: 0,
     gpsActual: null,
+    gpsPermission: 'unknown', // granted | prompt | denied | unknown
+    gpsUserOff: false,        // 用户手动关闭后，本次页面不再自动开启
+    gpsKeep: false,           // 有定位权限时尽量保持 GPS 常开
+    gpsFixCount: 0,
+    gpsWorked: false,         // 曾成功定位过（无 Permissions API 时用于自动开启）
+    gpsRestartTimer: null,
+    gpsAutoDisabled: false,
+    safeBottom: 0,            // 车机浏览器底部遮挡补偿（px）
     walkMode: false,
     walkFactor: 25,
     rateTimer: null,
@@ -108,6 +116,8 @@
       if (Number.isFinite(data.coins)) state.coins = data.coins;
       if (Number.isFinite(data.volume)) state.volume = clamp(data.volume, 0, 1);
       if (Number.isFinite(data.speed)) state.speed = clamp(data.speed, SPEED_MIN, SPEED_MAX);
+      if (Number.isFinite(data.safeBottom)) state.safeBottom = clamp(Math.round(data.safeBottom), 0, 240);
+      if (data.gpsWorked === true) state.gpsWorked = true;
       if (data.selectedSongId && SONGS[data.selectedSongId]) state.selectedSongId = data.selectedSongId;
       if (data.usage && typeof data.usage === 'object') {
         ['opens', 'opensToday', 'rides', 'ridesToday'].forEach((key) => {
@@ -126,6 +136,8 @@
         volume: state.volume,
         speed: state.speed,
         selectedSongId: state.selectedSongId,
+        safeBottom: state.safeBottom,
+        gpsWorked: state.gpsWorked,
         usage: state.usage
       }));
     } catch (_) { /* ignore */ }
@@ -158,8 +170,8 @@
     els.timeTotal = $('#timeTotal');
     els.speedRange = $('#speedRange');
     els.gpsBtn = $('#gpsBtn');
+    els.gpsLabel = $('#gpsLabel');
     els.autoBtn = $('#autoBtn');
-    els.walkBtn = $('#walkBtn');
     els.speedLabel = $('.metric-row .metric-label');
     els.speedUnit = $('#speedUnit');
     els.resetBtn = $('#resetBtn');
@@ -174,6 +186,8 @@
     els.debugClose = $('#debugClose');
     els.walkToggle = $('#walkToggle');
     els.walkFactorInput = $('#walkFactorInput');
+    els.safeBottomInput = $('#safeBottomInput');
+    els.rideLive = $('#rideLive');
     els.brand = $('.brand');
   }
 
@@ -464,18 +478,15 @@
 
   /* 步行测试：把 GPS 实测车速放大若干倍，方便手机步行验证摇动/倍速变化 */
   function updateWalkUi() {
-    if (els.walkBtn) els.walkBtn.setAttribute('aria-pressed', String(state.walkMode));
+    if (els.walkToggle) els.walkToggle.checked = state.walkMode;
     if (els.speedLabel) els.speedLabel.textContent = state.walkMode ? '等效车速' : '车速';
     if (els.speedUnit) {
       els.speedUnit.textContent = state.walkMode && state.gpsActual != null
         ? 'km/h · 实际 ' + state.gpsActual.toFixed(1)
         : 'km/h';
     }
-    if (state.walkMode && state.gpsActive) {
-      els.speedSource.textContent = 'GPS·步行×' + state.walkFactor;
-    } else if (state.gpsActive) {
-      els.speedSource.textContent = 'GPS';
-    }
+    if (state.gpsActive) els.speedSource.textContent = gpsSourceText();
+    renderGps();
   }
 
   function setWalkMode(on, { silent = false } = {}) {
@@ -503,23 +514,128 @@
     return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
-  function startGps() {
-    if (state.gpsActive) { stopGps(); return; }
-    if (!('geolocation' in navigator)) { toast('当前浏览器不支持 GPS 定位，先用滑杆模拟吧'); return; }
-    if (!window.isSecureContext) { toast('定位需要 HTTPS 或 localhost 环境；本地预览请用 http://127.0.0.1:8765 打开'); return; }
-    if (state.autoCruise) setAutoCruise(false);
+  function renderGps() {
+    if (!els.gpsBtn) return;
+    const status = state.gpsActive
+      ? (state.gpsFixCount > 0 ? 'on' : 'pending')
+      : (state.gpsPermission === 'denied' ? 'denied' : 'off');
+    els.gpsBtn.setAttribute('aria-pressed', String(status === 'on' || status === 'pending'));
+    els.gpsBtn.classList.toggle('is-pending', status === 'pending');
+    els.gpsBtn.classList.toggle('is-denied', status === 'denied');
+    if (els.gpsLabel) {
+      els.gpsLabel.textContent = {
+        on: 'GPS 已开启',
+        pending: 'GPS 定位中…',
+        denied: 'GPS 无权限',
+        off: 'GPS 未开启'
+      }[status];
+    }
+    els.gpsBtn.setAttribute('title', status === 'on' || status === 'pending'
+      ? '点击关闭 GPS 车速定位'
+      : '点击开启 GPS 车速定位');
+  }
+
+  function gpsSourceText() {
+    return state.walkMode ? 'GPS·步行×' + state.walkFactor : 'GPS';
+  }
+
+  /* 车机浏览器上下栏遮挡补偿：调试面板可调，自动记住 */
+  function applySafeBottom() {
+    document.documentElement.style.setProperty('--car-safe-bottom', Math.max(0, Math.round(state.safeBottom)) + 'px');
+  }
+
+  function saveGpsWorked() {
+    if (state.gpsWorked) return;
+    state.gpsWorked = true;
+    saveStore();
+  }
+
+  /* 有定位权限就自动开，并尽量保持常开；没权限时只显示按钮，不主动弹授权 */
+  async function initGpsAuto() {
+    if (state.gpsAutoDisabled) { renderGps(); return; }
+    let perm = null;
+    if (navigator.permissions && navigator.permissions.query) {
+      try { perm = await navigator.permissions.query({ name: 'geolocation' }); } catch (_) { perm = null; }
+    }
+    if (perm) {
+      state.gpsPermission = perm.state;
+      try {
+        perm.addEventListener('change', () => {
+          state.gpsPermission = perm.state;
+          if (perm.state === 'granted') {
+            state.gpsKeep = true;
+            if (!state.gpsUserOff && !state.gpsActive && !state.autoCruise) startGps({ auto: true });
+          }
+          renderGps();
+        });
+      } catch (_) { /* 老浏览器忽略 */ }
+    }
+    const autoStart = state.gpsPermission === 'granted'
+      || (state.gpsPermission === 'unknown' && state.gpsWorked);
+    if (autoStart && !state.gpsUserOff && !state.autoCruise) {
+      state.gpsKeep = true;
+      startGps({ auto: true });
+    } else {
+      renderGps();
+      if (els.sourceNote) {
+        els.sourceNote.textContent = state.gpsPermission === 'denied'
+          ? '车速来源：滑杆模拟 / 巡航；定位权限被拒绝，可在浏览器站点设置中允许后重试。'
+          : '车速来源：滑杆模拟 / 巡航；点左上角「GPS」开启定位测速。';
+      }
+    }
+  }
+
+  function toggleGps() {
+    if (state.gpsActive) {
+      state.gpsUserOff = true;
+      stopGps();
+      toast('📡 GPS 定位已关闭，车速按滑杆 / 巡航');
+      return;
+    }
+    state.gpsUserOff = false;
+    startGps();
+  }
+
+  function startGps({ auto = false } = {}) {
+    if (state.gpsActive) return;
+    if (!('geolocation' in navigator)) {
+      state.gpsPermission = 'denied';
+      renderGps();
+      toast('当前浏览器不支持 GPS 定位，先用滑杆模拟吧');
+      return;
+    }
+    if (!window.isSecureContext) {
+      toast('定位需要 HTTPS 或 localhost 环境；本地预览请用 http://127.0.0.1:8765 打开');
+      return;
+    }
+    if (state.autoCruise) {
+      state.autoCruise = false;
+      if (state.autoTimer) { window.clearInterval(state.autoTimer); state.autoTimer = null; }
+      els.autoBtn.setAttribute('aria-pressed', 'false');
+      els.autoBtn.textContent = '▶ 自动巡航';
+    }
     state.gpsActive = true;
+    state.gpsFixCount = 0;
     state.gpsLast = null;
     state.gpsSpeed = null;
     state.gpsErrorCount = 0;
-    els.gpsBtn.setAttribute('aria-pressed', 'true');
-    els.speedSource.textContent = state.walkMode ? 'GPS·步行×' + state.walkFactor : 'GPS';
-    state.gpsWatch = navigator.geolocation.watchPosition(onGpsPosition, onGpsError, {
-      enableHighAccuracy: true, maximumAge: 1000, timeout: 15000
-    });
-    els.sourceNote.textContent = '正在等待定位授权…（真车需在车机浏览器允许定位）';
+    renderGps();
+    els.speedSource.textContent = state.walkMode ? gpsSourceText() + '…' : 'GPS 连接中…';
+    try {
+      state.gpsWatch = navigator.geolocation.watchPosition(onGpsPosition, onGpsError, {
+        enableHighAccuracy: true, maximumAge: 1000, timeout: 15000
+      });
+    } catch (_) {
+      state.gpsActive = false;
+      renderGps();
+      toast('定位开启失败，请检查浏览器权限');
+      return;
+    }
+    els.sourceNote.textContent = auto
+      ? '检测到定位权限，已自动开启 GPS 测速…'
+      : '正在等待定位授权…（真车需在车机浏览器允许定位）';
     els.sourceNote.classList.remove('is-live');
-    toast('📡 已请求定位：允许后车速将自动跟随 GPS');
+    if (!auto) toast('📡 已请求定位：允许后车速将自动跟随 GPS');
   }
 
   function stopGps(keepNote = false) {
@@ -528,26 +644,50 @@
     }
     state.gpsWatch = null;
     state.gpsActive = false;
+    state.gpsFixCount = 0;
     state.gpsLast = null;
     state.gpsSpeed = null;
-    state.gpsErrorCount = 0;
     state.gpsActual = null;
+    state.gpsErrorCount = 0;
+    if (state.gpsRestartTimer) { window.clearTimeout(state.gpsRestartTimer); state.gpsRestartTimer = null; }
     const wasWalk = state.walkMode;
     state.walkMode = false;
-    if (els.walkBtn) els.walkBtn.setAttribute('aria-pressed', 'false');
+    if (els.walkToggle) els.walkToggle.checked = false;
     if (els.speedLabel) els.speedLabel.textContent = '车速';
     if (els.speedUnit) els.speedUnit.textContent = 'km/h';
-    if (els.gpsBtn) { els.gpsBtn.setAttribute('aria-pressed', 'false'); }
-    if (els.speedSource && /GPS/.test(els.speedSource.textContent)) els.speedSource.textContent = '模拟';
+    if (els.speedSource && /GPS/.test(els.speedSource.textContent)) {
+      els.speedSource.textContent = state.autoCruise ? '巡航' : '模拟';
+    }
     if (els.sourceNote) {
       els.sourceNote.classList.remove('is-live');
       if (!keepNote) els.sourceNote.textContent = '车速来源：滑杆模拟 / 自动巡航 / GPS 定位。';
     }
+    renderGps();
+    if (wasWalk) updateWalkUi();
+  }
+
+  function scheduleGpsRetry() {
+    if (state.gpsRestartTimer) window.clearTimeout(state.gpsRestartTimer);
+    state.gpsRestartTimer = window.setTimeout(() => {
+      state.gpsRestartTimer = null;
+      if (!state.gpsActive && !state.gpsUserOff && !state.autoCruise
+          && (state.gpsPermission === 'granted' || state.gpsWorked)) {
+        startGps({ auto: true });
+      }
+    }, 5000);
   }
 
   function onGpsPosition(position) {
     if (!state.gpsActive) return;
     state.gpsErrorCount = 0;
+    state.gpsFixCount += 1;
+    saveGpsWorked();
+    if (state.gpsFixCount === 1) {
+      state.gpsKeep = true;
+      if (state.gpsPermission !== 'denied') state.gpsPermission = 'granted';
+      els.speedSource.textContent = gpsSourceText();
+      renderGps();
+    }
     const c = position.coords;
     const accuracy = Math.round(Number(c.accuracy) || 0);
     let kmh = null;
@@ -577,13 +717,12 @@
       ? Math.min(SPEED_MAX, state.gpsActual * state.walkFactor)
       : state.gpsActual;
     setSpeed(Math.round(effective), { silent: true });
+    els.speedSource.textContent = gpsSourceText();
     if (state.walkMode) {
       if (els.speedUnit) els.speedUnit.textContent = 'km/h · 实际 ' + state.gpsActual.toFixed(1);
-      els.speedSource.textContent = 'GPS·步行×' + state.walkFactor;
       els.sourceNote.textContent = '步行测试：GPS 实际 ' + state.gpsActual.toFixed(1) + ' km/h → 等效 ' + Math.round(effective) + ' km/h（×' + state.walkFactor + '）';
     } else {
       if (els.speedUnit) els.speedUnit.textContent = 'km/h';
-      els.speedSource.textContent = 'GPS';
       els.sourceNote.textContent = 'GPS 实测：' + Math.round(state.gpsSpeed) + ' km/h · 精度 ±' + accuracy + ' m（定位估算，非 CAN 原始车速）';
     }
     els.sourceNote.classList.add('is-live');
@@ -592,18 +731,24 @@
   function onGpsError(error) {
     if (!state.gpsActive) return;
     if (error.code === 1) {
-      toast('定位权限被拒绝，已回到模拟车速');
+      state.gpsPermission = 'denied';
+      state.gpsUserOff = true;
       stopGps();
+      renderGps();
+      toast('定位权限被拒绝，可在浏览器站点设置里允许后重试');
       return;
     }
     state.gpsErrorCount += 1;
     if (state.gpsErrorCount >= 4) {
-      toast('GPS 连续无信号，已回到模拟车速');
-      stopGps();
+      stopGps(true);
+      els.sourceNote.textContent = 'GPS 暂无信号，5 秒后自动重试…';
+      els.sourceNote.classList.add('is-live');
+      scheduleGpsRetry();
       return;
     }
     els.sourceNote.textContent = (error.code === 3 ? 'GPS 暂无信号' : 'GPS 信号弱') + '（等待重连…）已保留上一次车速';
     els.sourceNote.classList.add('is-live');
+    renderGps();
   }
 
   function maybeNomiSpeed(speed) {
@@ -623,6 +768,7 @@
     if (!els.debugBody) return;
     if (els.walkToggle) els.walkToggle.checked = state.walkMode;
     if (els.walkFactorInput) els.walkFactorInput.value = state.walkFactor;
+    if (els.safeBottomInput) els.safeBottomInput.value = state.safeBottom;
     const wide = window.matchMedia(DEBUG_MODE_WIDE).matches;
     const portrait = window.matchMedia(DEBUG_MODE_PORTRAIT).matches;
     const mode = wide ? '宽屏：左摇摇车 + 右上信息 / 右下选歌'
@@ -631,7 +777,9 @@
     const debugState = typeof window.__nomiDebug === 'function' ? window.__nomiDebug() : null;
     const audioApi = !!(window.AudioContext || window.webkitAudioContext);
     const rows = [
-      ['视口', window.innerWidth + ' × ' + window.innerHeight],
+      ['视口', window.innerWidth + ' × ' + window.innerHeight
+        + (window.visualViewport ? ' · 可视 ' + Math.round(window.visualViewport.width) + ' × ' + Math.round(window.visualViewport.height) : '')],
+      ['底部安全区', state.safeBottom + ' px' + (state.safeBottom > 0 ? '（已补偿车机浏览器遮挡）' : '')],
       ['屏幕', window.screen.width + ' × ' + window.screen.height + ' @' + (window.devicePixelRatio || 1) + 'x'],
       ['页面高度', document.documentElement.scrollHeight + (document.documentElement.scrollHeight > window.innerHeight + 1 ? '（有滚动）' : '（一屏）')],
       ['布局模式', mode],
@@ -648,7 +796,9 @@
         ? new Date(debugState.usage.lastAt).toLocaleString()
         : '—'],
       ['定位/步行', debugState
-        ? ((debugState.gpsActive ? 'GPS 已开启' : 'GPS 未开启')
+        ? ('权限 ' + debugState.gpsPermission
+          + ' · ' + (debugState.gpsActive ? 'GPS 已开启' : 'GPS 未开启')
+          + (debugState.gpsFixCount ? ' · 已定位' : '')
           + (debugState.walkMode ? ' · 步行×' + debugState.walkFactor : '')
           + (debugState.gpsActual != null ? ' · 实际 ' + debugState.gpsActual.toFixed(1) + ' km/h' : ''))
         : '未就绪'],
@@ -708,6 +858,21 @@
         }
       });
     }
+    if (els.safeBottomInput) {
+      els.safeBottomInput.value = state.safeBottom;
+      els.safeBottomInput.addEventListener('change', () => {
+        const value = Math.round(Number(els.safeBottomInput.value));
+        if (Number.isFinite(value) && value >= 0 && value <= 240) {
+          state.safeBottom = value;
+          applySafeBottom();
+          saveStore();
+          renderDebugPanel();
+          toast('底部安全区已设为 ' + value + ' px');
+        } else {
+          els.safeBottomInput.value = state.safeBottom;
+        }
+      });
+    }
     window.addEventListener('resize', () => {
       if (!els.debugPanel.hidden) renderDebugPanel();
     });
@@ -752,8 +917,12 @@
       if (state.autoCruise) setAutoCruise(false);
       setSpeed(Number(ev.target.value));
     });
-    els.gpsBtn.addEventListener('click', startGps);
-    els.autoBtn.addEventListener('click', () => setAutoCruise(!state.autoCruise));
+    els.gpsBtn.addEventListener('click', toggleGps);
+    els.autoBtn.addEventListener('click', () => {
+      const next = !state.autoCruise;
+      setAutoCruise(next);
+      if (!next && state.gpsKeep && !state.gpsUserOff && !state.gpsActive) startGps({ auto: true });
+    });
     els.resetBtn.addEventListener('click', () => {
       if (state.walkMode) setWalkMode(false, { silent: true });
       stopGps(true);
@@ -788,10 +957,14 @@
         if (state.phase === 'riding' && audio.paused) {
           audio.play().catch(() => { /* 用户手势后一般可恢复 */ });
         }
+        // 有定位权限就保持 GPS 常开：切回页面时自动恢复
+        if (!state.gpsActive && !state.gpsUserOff && !state.autoCruise
+            && (state.gpsPermission === 'granted' || state.gpsWorked)) {
+          startGps({ auto: true });
+        }
         return;
       }
       if (!audio.paused) audio.pause();
-      if (state.gpsActive) stopGps(true);
     });
     document.addEventListener('keydown', (ev) => {
       if (ev.key === 'Escape' && !els.aboutModal.hidden) closeAbout();
@@ -836,6 +1009,14 @@
     let params = null;
     try { params = new URLSearchParams(window.location.search); } catch (_) { params = null; }
     if (params && params.get('gps') === '0') state.gpsAutoDisabled = true;
+    if (params && params.get('safe') !== null) {
+      const safe = Number(params.get('safe'));
+      if (Number.isFinite(safe) && safe >= 0 && safe <= 240) {
+        state.safeBottom = Math.round(safe);
+        saveStore();
+      }
+    }
+    applySafeBottom();
     if (params && params.get('walk') !== null) {
       const raw = params.get('walk');
       // ?walk=1 / ?walk 开启默认 ×25；?walk=40 可自定义；?walk=0 关闭
@@ -866,6 +1047,10 @@
       readyState: audio.readyState,
       src: audio.currentSrc || audio.src,
       gpsActive: state.gpsActive,
+      gpsPermission: state.gpsPermission,
+      gpsKeep: state.gpsKeep,
+      gpsFixCount: state.gpsFixCount,
+      safeBottom: state.safeBottom,
       gpsSpeed: state.gpsSpeed == null ? null : Number(state.gpsSpeed.toFixed(1)),
       gpsActual: state.gpsActual == null ? null : Number(state.gpsActual.toFixed(2)),
       walkMode: state.walkMode,
@@ -901,17 +1086,21 @@
         const value = Number(factor);
         if (Number.isFinite(value) && value >= 2 && value <= 100) state.walkFactor = value;
         updateWalkUi();
+      },
+      setSafeBottom(px) {
+        const value = Number(px);
+        if (Number.isFinite(value) && value >= 0 && value <= 240) {
+          state.safeBottom = Math.round(value);
+          applySafeBottom();
+          saveStore();
+        }
       }
     };
 
     initDebugPanel();
 
-    // 页面加载后自动申请 GPS 权限（仅 HTTPS / localhost 安全上下文；?gps=0 可关闭）
-    if (!state.gpsAutoDisabled && window.isSecureContext && 'geolocation' in navigator) {
-      window.setTimeout(() => {
-        if (!state.gpsActive) startGps();
-      }, 600);
-    }
+    // GPS：有定位权限就自动开启并保持；没权限不主动弹窗，点按钮再申请（?gps=0 可关闭）
+    initGpsAuto();
   }
 
   if (document.readyState === 'loading') {
