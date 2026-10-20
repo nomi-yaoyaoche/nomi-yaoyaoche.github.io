@@ -7,7 +7,7 @@
 <title>NOMI 摇摇车 · 投币开摇（蔚来车机 16:9 / 9:10）</title>
 <meta name="description" content="蔚来车机摇摇车：投币开摇，摇动速度随车速变化，MP3 原声按车速变速，不玩了就回家。" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230a63d8'/%3E%3Ccircle cx='32' cy='26' r='13' fill='%23fff'/%3E%3Ccircle cx='27' cy='25' r='3' fill='%230a63d8'/%3E%3Ccircle cx='37' cy='25' r='3' fill='%230a63d8'/%3E%3Cpath d='M25 32c4 4 10 4 14 0' stroke='%230a63d8' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3Crect x='12' y='42' width='40' height='12' rx='6' fill='%23ffd166' stroke='%2317223f' stroke-width='3'/%3E%3C/svg%3E" />
-<link rel="stylesheet" href="style.css?v=20261020-4" />
+<link rel="stylesheet" href="style.css?v=20261020-5" />
 </head>
 <body class="app-body phase-idle">
   <div class="app">
@@ -50,6 +50,12 @@
           <button class="stop-btn" id="stopBtn" type="button">🏠 不玩了，我要回家</button>
         </div>
 
+        <!-- NOMI 播报条：放在车顶上方，不遮车身 -->
+        <div class="nomi-bubble">
+          <span class="nomi-mini"><i></i><i></i></span>
+          <p id="nomiLine">NOMI：投币成功，我要开始摇啦！</p>
+        </div>
+
         <!-- 未投币：投币台 -->
         <div class="coin-stage" id="coinStage">
           <div class="coin-big" aria-hidden="true"><span class="coin-face">1</span></div>
@@ -65,11 +71,6 @@
 
         <!-- 已投币：摇摇车 -->
         <div class="ride-live" id="rideLive">
-          <div class="nomi-bubble">
-            <span class="nomi-mini"><i></i><i></i></span>
-            <p id="nomiLine">NOMI：投币成功，我要开始摇啦！</p>
-          </div>
-
           <div class="ride-machine-wrap">
             <div class="ride-base" aria-hidden="true">
               <span class="ride-base-label">NIO 摇摇车</span>
@@ -259,6 +260,6 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="app.js?v=20261020-4" defer></script>
+  <script src="app.js?v=20261020-5" defer></script>
 </body>
 </html>

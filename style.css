@@ -402,27 +402,29 @@ body.app-body {
 .is-playing .wheel-spin { animation: spin var(--wheel-duration, 1.2s) linear infinite; }
 .is-playing .ride-spring { animation: springPulse var(--rock-duration, 1.5s) ease-in-out infinite; }
 
-/* NOMI 气泡 */
+/* NOMI 播报条：放在车顶上方，不遮车身 */
 .nomi-bubble {
-  position: absolute;
-  left: 6px; bottom: 8px;
-  z-index: 4;
+  position: relative;
+  z-index: 3;
+  align-self: flex-start;
   display: flex; align-items: flex-start; gap: 7px;
-  width: min(52%, 350px);
-  padding: 8px 11px;
+  width: auto;
+  max-width: min(72%, 640px);
+  margin: 8px 2px 2px;
+  padding: 8px 12px;
   background: #fff;
   border: 3px solid var(--ink);
   border-radius: 14px;
   box-shadow: 0 3px 0 var(--ink);
-  transform: rotate(-1deg);
 }
 .nomi-bubble::after {
-  content: ""; position: absolute; right: 22px; bottom: -9px;
+  content: ""; position: absolute; left: 22px; bottom: -9px;
   width: 13px; height: 13px; background: #fff;
   border-right: 3px solid var(--ink); border-bottom: 3px solid var(--ink);
   transform: rotate(45deg);
 }
-.nomi-bubble p { margin: 0; font-size: 11px; font-weight: 700; line-height: 1.45; }
+.phase-idle .nomi-bubble { display: none; }
+.nomi-bubble p { margin: 0; font-size: clamp(11px, 1.25vh, 13px); font-weight: 700; line-height: 1.5; }
 .nomi-mini {
   flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center; gap: 4px;
@@ -774,14 +776,14 @@ body.app-body {
   .brand-copy small { display: none; }
   .chip { padding: 6px 10px; font-size: 11px; }
   .stage { gap: 14px; padding: 12px 0; }
-  .ride-stage { min-height: 360px; }
+  .ride-stage { min-height: 440px; }
   .ride-head { gap: 7px; row-gap: 6px; }
   .ride-speed-hint { display: none; }
   .ride-head .stop-btn { margin-left: auto; }
   .gps-btn { font-size: 12.5px; padding: 8px 12px; }
   .stop-btn { font-size: 13px; padding: 8px 13px; }
   .song-list { grid-template-columns: minmax(0, 1fr); }
-  .nomi-bubble { width: 62%; }
+  .nomi-bubble { width: auto; max-width: 88%; margin-top: 6px; }
   .song-card { flex-direction: row; align-items: center; }
   .song-meta { margin-left: auto; flex-direction: column; align-items: flex-end; width: auto; }
   .song-mark { margin-left: 0; }
