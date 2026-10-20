@@ -1,0 +1,922 @@
+/* ==========================================================================
+   NOMI 摇摇车 · 投币三段式
+   ① 摇摇车（未投币显示投币台；投币后摇动，摇速跟随车速）
+   ② 信息框（车速 / 播放音乐 / 播放速度 + 车速控制）
+   ③ 选歌
+   音频：用户提供的 MP3，单曲循环；0.8×–1.2× 保调变速。
+   ========================================================================== */
+'use strict';
+
+(function () {
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+  /* ------------------------------------------------------------------ *
+   * 1. 歌曲数据
+   * ------------------------------------------------------------------ */
+  const SONGS = {
+    family: {
+      id: 'family',
+      title: '家庭礼貌称呼歌',
+      subtitle: '爸爸的爸爸叫什么',
+      emoji: '🧓',
+      src: 'assets/jiating-limao-chenghu-ge.mp3',
+      durationLabel: '2:08',
+      nomi: 'NOMI：投币成功！这首是祖传提问，80 正常摇，120 全小区一起回答。'
+    },
+    baby: {
+      id: 'baby',
+      title: '宝贝宝贝',
+      subtitle: '贝瓦儿歌 · 哄娃专用',
+      emoji: '🍼',
+      src: 'assets/baobei-baobei.mp3',
+      durationLabel: '3:31',
+      nomi: 'NOMI：哄娃神曲已就位，摇得越慢越温柔。'
+    }
+  };
+
+  /* 车速 → 播放速度：0=0.8×，80=1.0×，120+=1.2× */
+  const SPEED_MIN = 0;
+  const SPEED_MAX = 140;
+  const NORMAL_SPEED = 80;
+  const FAST_SPEED = 120;
+  const RATE_SLOW = 0.8;
+  const RATE_FAST = 1.2;
+
+  function rateForSpeed(speed) {
+    const v = clamp(speed, SPEED_MIN, SPEED_MAX);
+    if (v <= NORMAL_SPEED) return RATE_SLOW + (v / NORMAL_SPEED) * (1 - RATE_SLOW);
+    return 1 + ((Math.min(v, FAST_SPEED) - NORMAL_SPEED) / (FAST_SPEED - NORMAL_SPEED)) * (RATE_FAST - 1);
+  }
+
+  /* 摇摇车摇动周期：车速越快摇得越快（0.65s–2.6s） */
+  function rockDurationForSpeed(speed) {
+    return clamp(2.6 - clamp(speed, 0, 160) / 70, 0.65, 2.6);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 2. 状态 / 音频
+   * ------------------------------------------------------------------ */
+  const STORE_KEY = 'nomi-yaoyaoche-v3';
+  const state = {
+    phase: 'idle',          // idle | riding
+    selectedSongId: 'family',
+    playing: false,
+    speed: NORMAL_SPEED,
+    rate: 1,
+    coins: 0,
+    volume: 0.6,
+    autoCruise: false,
+    autoTimer: null,
+    autoT: 0,
+    gpsActive: false,
+    gpsWatch: null,
+    gpsLast: null,
+    gpsSpeed: null,
+    gpsErrorCount: 0,
+    gpsActual: null,
+    walkMode: false,
+    walkFactor: 25,
+    rateTimer: null,
+    lastNomiAt: 0,
+    usage: {
+      opens: 0,
+      opensToday: 0,
+      rides: 0,
+      ridesToday: 0,
+      day: '',
+      lastAt: 0
+    }
+  };
+
+  const audio = new Audio();
+  audio.loop = true;
+  audio.preload = 'metadata';
+  audio.volume = state.volume;
+  audio.setAttribute('playsinline', '');
+  try {
+    audio.preservesPitch = true;
+    audio.webkitPreservesPitch = true;
+  } catch (_) { /* 老浏览器忽略 */ }
+
+  function loadStore() {
+    try {
+      const raw = localStorage.getItem(STORE_KEY);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      if (Number.isFinite(data.coins)) state.coins = data.coins;
+      if (Number.isFinite(data.volume)) state.volume = clamp(data.volume, 0, 1);
+      if (Number.isFinite(data.speed)) state.speed = clamp(data.speed, SPEED_MIN, SPEED_MAX);
+      if (data.selectedSongId && SONGS[data.selectedSongId]) state.selectedSongId = data.selectedSongId;
+      if (data.usage && typeof data.usage === 'object') {
+        ['opens', 'opensToday', 'rides', 'ridesToday'].forEach((key) => {
+          if (Number.isFinite(data.usage[key]) && data.usage[key] >= 0) state.usage[key] = data.usage[key];
+        });
+        if (typeof data.usage.day === 'string') state.usage.day = data.usage.day;
+        if (Number.isFinite(data.usage.lastAt)) state.usage.lastAt = data.usage.lastAt;
+      }
+    } catch (_) { /* 隐私模式忽略 */ }
+  }
+
+  function saveStore() {
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify({
+        coins: state.coins,
+        volume: state.volume,
+        speed: state.speed,
+        selectedSongId: state.selectedSongId,
+        usage: state.usage
+      }));
+    } catch (_) { /* ignore */ }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 3. 元素
+   * ------------------------------------------------------------------ */
+  const els = {};
+  function cacheEls() {
+    els.coinCount = $('#coinCount');
+    els.coinBtn = $('#coinBtn');
+    els.coinSongName = $('#coinSongName');
+    els.usageOpens = $('#usageOpens');
+    els.usageRides = $('#usageRides');
+    els.usageToday = $('#usageToday');
+    els.rideStage = $('#rideStage');
+    els.roadSpeedHint = $('#rideSpeedHint');
+    els.nomiLine = $('#nomiLine');
+    els.stopBtn = $('#stopBtn');
+    els.infoSpeed = $('#infoSpeed');
+    els.speedSource = $('#speedSource');
+    els.infoSong = $('#infoSong');
+    els.loopChip = $('#loopChip');
+    els.infoRate = $('#infoRate');
+    els.rateTag = $('#rateTag');
+    els.progress = $('#progress');
+    els.progressFill = $('#progressFill');
+    els.timeNow = $('#timeNow');
+    els.timeTotal = $('#timeTotal');
+    els.speedRange = $('#speedRange');
+    els.gpsBtn = $('#gpsBtn');
+    els.autoBtn = $('#autoBtn');
+    els.walkBtn = $('#walkBtn');
+    els.speedLabel = $('.metric-row .metric-label');
+    els.speedUnit = $('#speedUnit');
+    els.resetBtn = $('#resetBtn');
+    els.sourceNote = $('#sourceNote');
+    els.songCards = $$('.song-card');
+    els.aboutBtn = $('#aboutBtn');
+    els.aboutModal = $('#aboutModal');
+    els.aboutClose = $('#aboutClose');
+    els.toast = $('#toast');
+    els.debugPanel = $('#debugPanel');
+    els.debugBody = $('#debugBody');
+    els.debugClose = $('#debugClose');
+    els.walkToggle = $('#walkToggle');
+    els.walkFactorInput = $('#walkFactorInput');
+    els.brand = $('.brand');
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 4. 渲染
+   * ------------------------------------------------------------------ */
+  function rateTagFor(speed) {
+    if (speed >= FAST_SPEED) return { text: '最快摇 · 封顶', color: '#ff8fb1' };
+    if (speed > NORMAL_SPEED) return { text: '加速摇', color: '#ffd166' };
+    if (speed >= 60) return { text: '正常摇', color: '#ffd166' };
+    if (speed >= 25) return { text: '慢摇', color: '#8ce3c3' };
+    return { text: '养老摇', color: '#8ce3c3' };
+  }
+
+  function renderSpeed() {
+    const speed = Math.round(state.speed);
+    const tag = rateTagFor(state.speed);
+    els.infoSpeed.textContent = String(speed);
+    els.infoRate.textContent = state.rate.toFixed(2) + '×';
+    els.rateTag.textContent = tag.text;
+    if (els.roadSpeedHint) els.roadSpeedHint.textContent = '摇动速度 · ' + speed + ' km/h';
+    els.speedRange.value = String(speed);
+    const rock = rockDurationForSpeed(state.speed);
+    els.rideStage.style.setProperty('--rock-duration', rock.toFixed(2) + 's');
+    els.rideStage.style.setProperty('--wheel-duration', (rock * 0.62).toFixed(2) + 's');
+  }
+
+  function renderSong() {
+    const song = SONGS[state.selectedSongId];
+    els.coinSongName.textContent = song.title;
+    els.infoSong.textContent = state.phase === 'riding' ? song.title : '等待投币';
+    els.timeTotal.textContent = song.durationLabel;
+    els.songCards.forEach((card) => {
+      const isSelected = card.dataset.song === state.selectedSongId;
+      const isPlaying = isSelected && state.phase === 'riding';
+      card.classList.toggle('is-selected', isSelected);
+      card.classList.toggle('is-playing', isPlaying);
+      const mark = $('.song-mark', card);
+      if (mark) {
+        mark.textContent = isPlaying ? '播放中' : isSelected ? '已选' : '';
+        mark.classList.toggle('is-playing', isPlaying);
+      }
+    });
+    if (state.phase === 'riding') els.nomiLine.textContent = song.nomi;
+  }
+
+  function usageDay() {
+    const now = new Date();
+    return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+  }
+
+  function normalizeUsageDay() {
+    const today = usageDay();
+    if (state.usage.day !== today) {
+      state.usage.day = today;
+      state.usage.opensToday = 0;
+      state.usage.ridesToday = 0;
+    }
+  }
+
+  function renderUsage() {
+    if (els.usageOpens) els.usageOpens.textContent = String(state.usage.opens);
+    if (els.usageRides) els.usageRides.textContent = String(state.usage.rides);
+    if (els.usageToday) els.usageToday.textContent = String(state.usage.ridesToday);
+  }
+
+  function recordOpen() {
+    normalizeUsageDay();
+    state.usage.opens += 1;
+    state.usage.opensToday += 1;
+    state.usage.lastAt = Date.now();
+    saveStore();
+    renderUsage();
+  }
+
+  function recordRide() {
+    normalizeUsageDay();
+    state.usage.rides += 1;
+    state.usage.ridesToday += 1;
+    state.usage.lastAt = Date.now();
+    saveStore();
+    renderUsage();
+  }
+
+  function renderCoins() {
+    els.coinCount.textContent = String(state.coins);
+  }
+
+  function renderPhase() {
+    document.body.classList.toggle('phase-idle', state.phase === 'idle');
+    document.body.classList.toggle('phase-riding', state.phase === 'riding');
+    if (state.phase === 'idle') {
+      els.infoSong.textContent = '等待投币';
+      els.progressFill.style.width = '0%';
+      els.progress.setAttribute('aria-valuenow', '0');
+      els.timeNow.textContent = '0:00';
+      els.timeTotal.textContent = SONGS[state.selectedSongId].durationLabel;
+    }
+    renderSong();
+  }
+
+  function setPlayingClass(playing) {
+    state.playing = playing;
+    document.body.classList.toggle('is-playing', playing);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 5. 投币 / 停止 / 选歌
+   * ------------------------------------------------------------------ */
+  function startAudio() {
+    const song = SONGS[state.selectedSongId];
+    state.rate = rateForSpeed(state.speed);
+    try {
+      audio.src = song.src;
+      audio.loop = true;
+      audio.currentTime = 0;
+      audio.playbackRate = state.rate;
+    } catch (_) { /* ignore */ }
+    const started = audio.play();
+    if (started && typeof started.then === 'function') {
+      started.catch((err) => {
+        if (err && err.name === 'NotAllowedError') {
+          toast('浏览器拦住了自动播放，请再点一次「投币开摇」');
+        } else {
+          toast('音频没加载出来：检查 assets/ 下的 MP3 是否存在');
+          console.warn('audio play failed', err);
+        }
+      });
+    }
+  }
+
+  function insertCoin() {
+    if (state.phase === 'riding') return;
+    state.coins += 1;
+    recordRide();
+    saveStore();
+    renderCoins();
+    coinDing();
+    state.phase = 'riding';
+    document.body.classList.add('phase-riding');
+    document.body.classList.remove('phase-idle');
+    els.rideStage.classList.add('coin-drop');
+    window.setTimeout(() => els.rideStage.classList.remove('coin-drop'), 460);
+    renderPhase();
+    startAudio();
+    updateNomi('coin');
+    if (state.usage.rides > 0) {
+      els.nomiLine.textContent = 'NOMI：本机第 ' + state.usage.rides + ' 次开摇！硬币已到账，本次摇摇车由车速赞助。';
+    }
+    toast('🪙 投币成功！《' + SONGS[state.selectedSongId].title + '》开始循环播放');
+  }
+
+  function stopRide() {
+    if (state.phase !== 'riding') return;
+    audio.pause();
+    try { audio.currentTime = 0; } catch (_) { /* ignore */ }
+    state.phase = 'idle';
+    document.body.classList.remove('phase-riding');
+    document.body.classList.add('phase-idle');
+    setPlayingClass(false);
+    renderPhase();
+    byebyeSound();
+    toast('🏠 不玩了，已经回家。下次投币再摇！');
+  }
+
+  function selectSong(songId) {
+    if (!SONGS[songId]) return;
+    if (state.selectedSongId === songId && state.phase === 'riding') {
+      // 重复点当前歌：从头开始摇
+      try { audio.currentTime = 0; } catch (_) { /* ignore */ }
+      startAudio();
+      return;
+    }
+    state.selectedSongId = songId;
+    saveStore();
+    renderSong();
+    if (state.phase === 'riding') {
+      startAudio();
+      toast('🎵 已切歌：' + SONGS[songId].title + '，接着摇');
+    } else {
+      toast('已选《' + SONGS[songId].title + '》，投币就开摇');
+    }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 6. NOMI 语录 / 音效
+   * ------------------------------------------------------------------ */
+  function updateNomi(kind) {
+    const now = performance.now();
+    if (now - state.lastNomiAt < 2200 && kind !== 'home') return;
+    state.lastNomiAt = now;
+    const song = SONGS[state.selectedSongId];
+    const lines = {
+      coin: [song.nomi, 'NOMI：硬币已到账，本次摇摇车由车速赞助。'],
+      home: ['NOMI：回家路上慢点，下次还来摇。', 'NOMI：已停车，记得把车窗摇上，避免社死扩散。'],
+      slow: ['NOMI：这速度，摇摇车都要打哈欠了。', 'NOMI：慢摇模式，适合等红绿灯。'],
+      fast: ['NOMI：120 了！再快就只能听见风声了。', 'NOMI：全小区都听见了，注意社死半径。']
+    };
+    const pool = lines[kind] || lines.coin;
+    els.nomiLine.textContent = pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  let sfx = null;
+  function getSfx() {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      sfx = sfx || new AC();
+      if (sfx.state === 'suspended') sfx.resume();
+      return sfx;
+    } catch (_) { return null; }
+  }
+
+  function coinDing() {
+    const ctx = getSfx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    [1046, 1318, 1568].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const start = now + i * 0.07;
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.12, start + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.14);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + 0.16);
+    });
+  }
+
+  function byebyeSound() {
+    const ctx = getSfx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    [880, 660, 440].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const start = now + i * 0.11;
+      osc.type = 'triangle';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.1, start + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.22);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + 0.24);
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 7. 车速控制（模拟 / 自动巡航 / GPS）
+   * ------------------------------------------------------------------ */
+  function setSpeed(value, { silent = false } = {}) {
+    state.speed = clamp(Number(value) || 0, SPEED_MIN, SPEED_MAX);
+    state.rate = rateForSpeed(state.speed);
+    renderSpeed();
+    if (!silent) maybeNomiSpeed(state.speed);
+    if (state.phase === 'riding') {
+      try { audio.playbackRate = state.rate; } catch (_) { /* ignore */ }
+    }
+  }
+
+  function setAutoCruise(on) {
+    state.autoCruise = on;
+    els.autoBtn.setAttribute('aria-pressed', String(on));
+    els.autoBtn.textContent = on ? '⏸ 停止巡航' : '▶ 自动巡航';
+    if (on) {
+      setWalkMode(false, { silent: true });
+      stopGps(true);
+      state.autoT = 0;
+      els.speedSource.textContent = '巡航';
+      state.autoTimer = window.setInterval(() => {
+        state.autoT += 0.22;
+        const v = NORMAL_SPEED + 52 * Math.sin(state.autoT * 0.85) + 9 * Math.sin(state.autoT * 2.7 + 1.2);
+        setSpeed(v);
+      }, 220);
+      toast('🛣️ 自动巡航开启：车速自己摇');
+    } else {
+      if (state.autoTimer) { window.clearInterval(state.autoTimer); state.autoTimer = null; }
+      els.speedSource.textContent = '模拟';
+      toast('已接管车速，请手动摇');
+    }
+  }
+
+  /* 步行测试：把 GPS 实测车速放大若干倍，方便手机步行验证摇动/倍速变化 */
+  function updateWalkUi() {
+    if (els.walkBtn) els.walkBtn.setAttribute('aria-pressed', String(state.walkMode));
+    if (els.speedLabel) els.speedLabel.textContent = state.walkMode ? '等效车速' : '车速';
+    if (els.speedUnit) {
+      els.speedUnit.textContent = state.walkMode && state.gpsActual != null
+        ? 'km/h · 实际 ' + state.gpsActual.toFixed(1)
+        : 'km/h';
+    }
+    if (state.walkMode && state.gpsActive) {
+      els.speedSource.textContent = 'GPS·步行×' + state.walkFactor;
+    } else if (state.gpsActive) {
+      els.speedSource.textContent = 'GPS';
+    }
+  }
+
+  function setWalkMode(on, { silent = false } = {}) {
+    const next = !!on;
+    if (state.walkMode === next) { updateWalkUi(); return; }
+    state.walkMode = next;
+    updateWalkUi();
+    if (next) {
+      if (!state.gpsActive) startGps();
+      if (!silent) toast('🚶 步行测试开启：GPS 实际车速 ×' + state.walkFactor + ' → 等效车速');
+    } else {
+      if (!silent) toast('步行测试已关闭：按真实车速映射');
+      if (state.gpsActual != null) setSpeed(Math.round(state.gpsActual), { silent: true });
+      updateWalkUi();
+    }
+  }
+
+  /* GPS：浏览器拿不到 CAN 车速，用定位估算 */
+  function haversineMeters(lat1, lon1, lat2, lon2) {
+    const R = 6371000;
+    const rad = Math.PI / 180;
+    const dLat = (lat2 - lat1) * rad;
+    const dLon = (lon2 - lon1) * rad;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  function startGps() {
+    if (state.gpsActive) { stopGps(); return; }
+    if (!('geolocation' in navigator)) { toast('当前浏览器不支持 GPS 定位，先用滑杆模拟吧'); return; }
+    if (!window.isSecureContext) { toast('定位需要 HTTPS 或 localhost 环境；本地预览请用 http://127.0.0.1:8765 打开'); return; }
+    if (state.autoCruise) setAutoCruise(false);
+    state.gpsActive = true;
+    state.gpsLast = null;
+    state.gpsSpeed = null;
+    state.gpsErrorCount = 0;
+    els.gpsBtn.setAttribute('aria-pressed', 'true');
+    els.speedSource.textContent = state.walkMode ? 'GPS·步行×' + state.walkFactor : 'GPS';
+    state.gpsWatch = navigator.geolocation.watchPosition(onGpsPosition, onGpsError, {
+      enableHighAccuracy: true, maximumAge: 1000, timeout: 15000
+    });
+    els.sourceNote.textContent = '正在等待定位授权…（真车需在车机浏览器允许定位）';
+    els.sourceNote.classList.remove('is-live');
+    toast('📡 已请求定位：允许后车速将自动跟随 GPS');
+  }
+
+  function stopGps(keepNote = false) {
+    if (state.gpsWatch != null) {
+      try { navigator.geolocation.clearWatch(state.gpsWatch); } catch (_) { /* ignore */ }
+    }
+    state.gpsWatch = null;
+    state.gpsActive = false;
+    state.gpsLast = null;
+    state.gpsSpeed = null;
+    state.gpsErrorCount = 0;
+    state.gpsActual = null;
+    const wasWalk = state.walkMode;
+    state.walkMode = false;
+    if (els.walkBtn) els.walkBtn.setAttribute('aria-pressed', 'false');
+    if (els.speedLabel) els.speedLabel.textContent = '车速';
+    if (els.speedUnit) els.speedUnit.textContent = 'km/h';
+    if (els.gpsBtn) { els.gpsBtn.setAttribute('aria-pressed', 'false'); }
+    if (els.speedSource && /GPS/.test(els.speedSource.textContent)) els.speedSource.textContent = '模拟';
+    if (els.sourceNote) {
+      els.sourceNote.classList.remove('is-live');
+      if (!keepNote) els.sourceNote.textContent = '车速来源：滑杆模拟 / 自动巡航 / GPS 定位。';
+    }
+  }
+
+  function onGpsPosition(position) {
+    if (!state.gpsActive) return;
+    state.gpsErrorCount = 0;
+    const c = position.coords;
+    const accuracy = Math.round(Number(c.accuracy) || 0);
+    let kmh = null;
+    if (Number.isFinite(c.speed) && c.speed >= 0) {
+      kmh = c.speed * 3.6;
+    } else if (state.gpsLast) {
+      const dt = (position.timestamp - state.gpsLast.t) / 1000;
+      if (dt >= 0.5 && dt <= 10) {
+        const dist = haversineMeters(state.gpsLast.lat, state.gpsLast.lon, c.latitude, c.longitude);
+        if (Number.isFinite(dist) && dist >= 0) kmh = (dist / dt) * 3.6;
+      }
+    }
+    state.gpsLast = { t: position.timestamp, lat: c.latitude, lon: c.longitude };
+    if (kmh == null || !Number.isFinite(kmh)) {
+      els.sourceNote.textContent = 'GPS 已定位（精度 ±' + accuracy + ' m），移动后显示车速…';
+      els.sourceNote.classList.add('is-live');
+      return;
+    }
+    if (kmh > 220) {
+      els.sourceNote.textContent = 'GPS 信号有跳变，已忽略本次采样（精度 ±' + accuracy + ' m）';
+      return;
+    }
+    if (kmh < (state.walkMode ? 1 : 2.5)) kmh = 0; // 步行模式放宽停车过滤
+    state.gpsSpeed = state.gpsSpeed == null ? kmh : state.gpsSpeed * 0.65 + kmh * 0.35;
+    state.gpsActual = state.gpsSpeed;
+    const effective = state.walkMode
+      ? Math.min(SPEED_MAX, state.gpsActual * state.walkFactor)
+      : state.gpsActual;
+    setSpeed(Math.round(effective), { silent: true });
+    if (state.walkMode) {
+      if (els.speedUnit) els.speedUnit.textContent = 'km/h · 实际 ' + state.gpsActual.toFixed(1);
+      els.speedSource.textContent = 'GPS·步行×' + state.walkFactor;
+      els.sourceNote.textContent = '步行测试：GPS 实际 ' + state.gpsActual.toFixed(1) + ' km/h → 等效 ' + Math.round(effective) + ' km/h（×' + state.walkFactor + '）';
+    } else {
+      if (els.speedUnit) els.speedUnit.textContent = 'km/h';
+      els.speedSource.textContent = 'GPS';
+      els.sourceNote.textContent = 'GPS 实测：' + Math.round(state.gpsSpeed) + ' km/h · 精度 ±' + accuracy + ' m（定位估算，非 CAN 原始车速）';
+    }
+    els.sourceNote.classList.add('is-live');
+  }
+
+  function onGpsError(error) {
+    if (!state.gpsActive) return;
+    if (error.code === 1) {
+      toast('定位权限被拒绝，已回到模拟车速');
+      stopGps();
+      return;
+    }
+    state.gpsErrorCount += 1;
+    if (state.gpsErrorCount >= 4) {
+      toast('GPS 连续无信号，已回到模拟车速');
+      stopGps();
+      return;
+    }
+    els.sourceNote.textContent = (error.code === 3 ? 'GPS 暂无信号' : 'GPS 信号弱') + '（等待重连…）已保留上一次车速';
+    els.sourceNote.classList.add('is-live');
+  }
+
+  function maybeNomiSpeed(speed) {
+    const now = performance.now();
+    if (now - state.lastNomiAt < 4000) return;
+    if (speed >= FAST_SPEED) updateNomi('fast');
+    else if (speed <= 20) updateNomi('slow');
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 7.5 车机调试面板（5 次点击 NIO 标，或 ?debug=1）
+   * ------------------------------------------------------------------ */
+  const DEBUG_MODE_WIDE = '(min-aspect-ratio: 5/4) and (min-height: 600px) and (min-width: 900px)';
+  const DEBUG_MODE_PORTRAIT = '(max-aspect-ratio: 5/4) and (min-height: 760px) and (min-width: 720px)';
+
+  function renderDebugPanel() {
+    if (!els.debugBody) return;
+    if (els.walkToggle) els.walkToggle.checked = state.walkMode;
+    if (els.walkFactorInput) els.walkFactorInput.value = state.walkFactor;
+    const wide = window.matchMedia(DEBUG_MODE_WIDE).matches;
+    const portrait = window.matchMedia(DEBUG_MODE_PORTRAIT).matches;
+    const mode = wide ? '宽屏：左摇摇车 + 右上信息 / 右下选歌'
+      : portrait ? '竖屏：摇摇车 / 信息 / 选歌 三段'
+      : '回退：可滚动布局';
+    const debugState = typeof window.__nomiDebug === 'function' ? window.__nomiDebug() : null;
+    const audioApi = !!(window.AudioContext || window.webkitAudioContext);
+    const rows = [
+      ['视口', window.innerWidth + ' × ' + window.innerHeight],
+      ['屏幕', window.screen.width + ' × ' + window.screen.height + ' @' + (window.devicePixelRatio || 1) + 'x'],
+      ['页面高度', document.documentElement.scrollHeight + (document.documentElement.scrollHeight > window.innerHeight + 1 ? '（有滚动）' : '（一屏）')],
+      ['布局模式', mode],
+      ['驾驶模式', debugState ? (debugState.walkMode ? '步行测试 ×' + debugState.walkFactor : '车辆模式（默认）') : '车辆模式'],
+      ['安全上下文', window.isSecureContext ? '是（GPS 可用）' : '否（需 HTTPS / localhost）'],
+      ['定位 API', 'geolocation' in navigator ? '支持' : '不支持'],
+      ['音频 API', audioApi ? '支持' : '不支持'],
+      ['播放状态', debugState ? (debugState.phase + ' / ' + (debugState.playing ? '播放中' : '未播放')) : '未就绪'],
+      ['使用统计', debugState && debugState.usage
+        ? ('打开 ' + debugState.usage.opens + ' 次（今日 ' + debugState.usage.opensToday + '）· 开摇 '
+          + debugState.usage.rides + ' 次（今日 ' + debugState.usage.ridesToday + '）')
+        : '未就绪'],
+      ['上次使用', debugState && debugState.usage && debugState.usage.lastAt
+        ? new Date(debugState.usage.lastAt).toLocaleString()
+        : '—'],
+      ['定位/步行', debugState
+        ? ((debugState.gpsActive ? 'GPS 已开启' : 'GPS 未开启')
+          + (debugState.walkMode ? ' · 步行×' + debugState.walkFactor : '')
+          + (debugState.gpsActual != null ? ' · 实际 ' + debugState.gpsActual.toFixed(1) + ' km/h' : ''))
+        : '未就绪'],
+      ['UA', navigator.userAgent]
+    ];
+    els.debugBody.innerHTML = '';
+    rows.forEach(([label, value]) => {
+      const dt = document.createElement('dt');
+      dt.textContent = label;
+      const dd = document.createElement('dd');
+      dd.textContent = value;
+      els.debugBody.appendChild(dt);
+      els.debugBody.appendChild(dd);
+    });
+  }
+
+  function showDebugPanel() {
+    if (!els.debugPanel) return;
+    renderDebugPanel();
+    els.debugPanel.hidden = false;
+  }
+
+  function initDebugPanel() {
+    if (!els.debugPanel || !els.brand) return;
+    let taps = 0;
+    let timer = null;
+    els.brand.addEventListener('click', () => {
+      taps += 1;
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(() => { taps = 0; }, 1200);
+      if (taps >= 5) {
+        taps = 0;
+        if (timer) window.clearTimeout(timer);
+        showDebugPanel();
+      }
+    });
+    if (els.debugClose) {
+      els.debugClose.addEventListener('click', () => { els.debugPanel.hidden = true; });
+    }
+    if (els.walkToggle) {
+      els.walkToggle.checked = state.walkMode;
+      els.walkToggle.addEventListener('change', () => {
+        setWalkMode(els.walkToggle.checked, { silent: true });
+        renderDebugPanel();
+      });
+    }
+    if (els.walkFactorInput) {
+      els.walkFactorInput.value = state.walkFactor;
+      els.walkFactorInput.addEventListener('change', () => {
+        const value = Math.round(Number(els.walkFactorInput.value));
+        if (Number.isFinite(value) && value >= 2 && value <= 100) {
+          state.walkFactor = value;
+          updateWalkUi();
+          renderDebugPanel();
+        } else {
+          els.walkFactorInput.value = state.walkFactor;
+        }
+      });
+    }
+    window.addEventListener('resize', () => {
+      if (!els.debugPanel.hidden) renderDebugPanel();
+    });
+    try {
+      if (new URLSearchParams(window.location.search).get('debug') === '1') showDebugPanel();
+    } catch (_) { /* ignore */ }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 8. 弹窗 / Toast
+   * ------------------------------------------------------------------ */
+  let toastTimer = null;
+  function toast(message) {
+    if (!els.toast) return;
+    els.toast.textContent = message;
+    els.toast.classList.add('show');
+    if (toastTimer) window.clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(() => els.toast.classList.remove('show'), 2400);
+  }
+
+  function openAbout() {
+    els.aboutModal.hidden = false;
+    document.body.style.overflow = 'hidden';
+  }
+  function closeAbout() {
+    els.aboutModal.hidden = true;
+    document.body.style.overflow = '';
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 9. 事件绑定
+   * ------------------------------------------------------------------ */
+  function bind() {
+    els.coinBtn.addEventListener('click', insertCoin);
+    els.stopBtn.addEventListener('click', stopRide);
+    els.songCards.forEach((card) => {
+      card.addEventListener('click', () => selectSong(card.dataset.song));
+    });
+    els.speedRange.addEventListener('input', (ev) => {
+      if (state.walkMode) setWalkMode(false, { silent: true });
+      if (state.gpsActive) stopGps(true);
+      if (state.autoCruise) setAutoCruise(false);
+      setSpeed(Number(ev.target.value));
+    });
+    els.gpsBtn.addEventListener('click', startGps);
+    els.autoBtn.addEventListener('click', () => setAutoCruise(!state.autoCruise));
+    els.resetBtn.addEventListener('click', () => {
+      if (state.walkMode) setWalkMode(false, { silent: true });
+      stopGps(true);
+      setSpeed(NORMAL_SPEED);
+      toast('已回到 80 km/h：正常摇');
+    });
+    els.aboutBtn.addEventListener('click', openAbout);
+    els.aboutClose.addEventListener('click', closeAbout);
+    els.aboutModal.addEventListener('click', (ev) => {
+      if (ev.target === els.aboutModal) closeAbout();
+    });
+
+    audio.addEventListener('play', () => setPlayingClass(true));
+    audio.addEventListener('pause', () => setPlayingClass(false));
+    audio.addEventListener('timeupdate', () => {
+      const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+      const percent = duration ? clamp((audio.currentTime / duration) * 100, 0, 100) : 0;
+      els.progressFill.style.width = percent.toFixed(2) + '%';
+      els.progress.setAttribute('aria-valuenow', percent.toFixed(0));
+      els.timeNow.textContent = formatTime(audio.currentTime);
+    });
+    audio.addEventListener('loadedmetadata', () => {
+      if (Number.isFinite(audio.duration)) els.timeTotal.textContent = formatTime(audio.duration);
+    });
+    audio.addEventListener('error', () => {
+      toast('音频加载失败：请确认 assets/ 下 MP3 存在');
+      console.warn('audio error', audio.error);
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        if (state.phase === 'riding' && audio.paused) {
+          audio.play().catch(() => { /* 用户手势后一般可恢复 */ });
+        }
+        return;
+      }
+      if (!audio.paused) audio.pause();
+      if (state.gpsActive) stopGps(true);
+    });
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && !els.aboutModal.hidden) closeAbout();
+      if (ev.target && /INPUT|SELECT|TEXTAREA/.test(ev.target.tagName)) return;
+      if (ev.code === 'Space') {
+        ev.preventDefault();
+        if (state.phase === 'idle') insertCoin(); else stopRide();
+      }
+    });
+  }
+
+  function formatTime(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+    const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+    return Math.floor(seconds / 60) + ':' + s;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 10. 启动
+   * ------------------------------------------------------------------ */
+  function boot() {
+    loadStore();
+    cacheEls();
+    audio.volume = state.volume;
+    recordOpen();
+    renderCoins();
+    renderPhase();
+    setSpeed(state.speed, { silent: true });
+    setPlayingClass(false);
+
+    state.rateTimer = window.setInterval(() => {
+      state.rate = rateForSpeed(state.speed);
+      renderSpeed();
+      if (state.phase === 'riding' && !audio.paused) {
+        try { audio.playbackRate = state.rate; } catch (_) { /* ignore */ }
+      }
+    }, 160);
+
+    bind();
+
+    // URL 参数：?walk=1 开启步行测试；?gps=0 关闭自动定位权限申请
+    let params = null;
+    try { params = new URLSearchParams(window.location.search); } catch (_) { params = null; }
+    if (params && params.get('gps') === '0') state.gpsAutoDisabled = true;
+    if (params && params.get('walk') !== null) {
+      const raw = params.get('walk');
+      // ?walk=1 / ?walk 开启默认 ×25；?walk=40 可自定义；?walk=0 关闭
+      if (raw === '' || raw === '1' || raw === 'true') {
+        state.walkMode = true;
+      } else if (raw !== '0' && raw !== 'false') {
+        const factor = Number(raw);
+        if (Number.isFinite(factor) && factor >= 2) {
+          state.walkFactor = Math.min(100, factor);
+          state.walkMode = true;
+        }
+      }
+    }
+    updateWalkUi();
+
+    window.__nomiReady = true;
+    window.__nomiDebug = () => ({
+      ready: true,
+      phase: state.phase,
+      selectedSongId: state.selectedSongId,
+      playing: !audio.paused,
+      paused: audio.paused,
+      speed: Math.round(state.speed),
+      rate: Number(state.rate.toFixed(3)),
+      audioRate: audio.playbackRate,
+      currentTime: Number(audio.currentTime.toFixed(2)),
+      duration: Number.isFinite(audio.duration) ? Number(audio.duration.toFixed(2)) : null,
+      readyState: audio.readyState,
+      src: audio.currentSrc || audio.src,
+      gpsActive: state.gpsActive,
+      gpsSpeed: state.gpsSpeed == null ? null : Number(state.gpsSpeed.toFixed(1)),
+      gpsActual: state.gpsActual == null ? null : Number(state.gpsActual.toFixed(2)),
+      walkMode: state.walkMode,
+      walkFactor: state.walkFactor,
+      autoCruise: state.autoCruise,
+      coins: state.coins,
+      usage: {
+        opens: state.usage.opens,
+        opensToday: state.usage.opensToday,
+        rides: state.usage.rides,
+        ridesToday: state.usage.ridesToday,
+        day: state.usage.day,
+        lastAt: state.usage.lastAt
+      },
+      modalOpen: !els.aboutModal.hidden,
+      viewport: { w: window.innerWidth, h: window.innerHeight, scrollH: document.documentElement.scrollHeight }
+    });
+
+    /* 车机集成 API（真实车速由原生壳每秒注入） */
+    window.NOMI_YAOYAOCHE = {
+      setSpeed(kmh) { setSpeed(kmh); },
+      play(songId) {
+        if (songId && SONGS[songId]) state.selectedSongId = songId;
+        renderSong();
+        if (state.phase === 'riding') startAudio();
+        else insertCoin();
+      },
+      stop() { stopRide(); },
+      useGps() { startGps(); },
+      getState() { return window.__nomiDebug(); },
+      setWalkMode(on) { setWalkMode(on); },
+      setWalkFactor(factor) {
+        const value = Number(factor);
+        if (Number.isFinite(value) && value >= 2 && value <= 100) state.walkFactor = value;
+        updateWalkUi();
+      }
+    };
+
+    initDebugPanel();
+
+    // 页面加载后自动申请 GPS 权限（仅 HTTPS / localhost 安全上下文；?gps=0 可关闭）
+    if (!state.gpsAutoDisabled && window.isSecureContext && 'geolocation' in navigator) {
+      window.setTimeout(() => {
+        if (!state.gpsActive) startGps();
+      }, 600);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
