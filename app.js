@@ -83,6 +83,10 @@
     gpsWorked: false,         // 曾成功定位过（无 Permissions API 时用于自动开启）
     gpsRestartTimer: null,
     gpsAutoDisabled: false,
+    gpsModalShown: false,
+    gpsModalDismissed: false,
+    gpsPromptRequested: false,
+    gpsPromptTimer: null,
     safeBottom: 0,            // 车机浏览器底部遮挡补偿（px）
     walkMode: false,
     walkFactor: 25,
@@ -171,6 +175,12 @@
     els.speedRange = $('#speedRange');
     els.gpsBtn = $('#gpsBtn');
     els.gpsLabel = $('#gpsLabel');
+    els.gpsModal = $('#gpsModal');
+    els.gpsClose = $('#gpsClose');
+    els.gpsRetryBtn = $('#gpsRetryBtn');
+    els.gpsSkipBtn = $('#gpsSkipBtn');
+    els.gpsModalText = $('#gpsModalText');
+    els.gpsModalHint = $('#gpsModalHint');
     els.autoBtn = $('#autoBtn');
     els.speedLabel = $('.metric-row .metric-label');
     els.speedUnit = $('#speedUnit');
@@ -211,8 +221,11 @@
     if (els.roadSpeedHint) els.roadSpeedHint.textContent = '摇动速度 · ' + speed + ' km/h';
     els.speedRange.value = String(speed);
     const rock = rockDurationForSpeed(state.speed);
+    const wheel = clamp(2.4 - state.speed / 50, 0.35, 2.4);
+    const lift = clamp(2 + state.speed / 25, 2, 8);
     els.rideStage.style.setProperty('--rock-duration', rock.toFixed(2) + 's');
-    els.rideStage.style.setProperty('--wheel-duration', (rock * 0.62).toFixed(2) + 's');
+    els.rideStage.style.setProperty('--wheel-duration', wheel.toFixed(2) + 's');
+    els.rideStage.style.setProperty('--bob-lift', lift.toFixed(1) + 'px');
   }
 
   function renderSong() {
@@ -550,9 +563,70 @@
     saveStore();
   }
 
-  /* 有定位权限就自动开，并尽量保持常开；没权限时只显示按钮，不主动弹授权 */
+  /* GPS 权限：加载完就主动请求；有权限自动保持；没权限弹窗提示 */
+  function updateGpsModalText(reason) {
+    if (!els.gpsModalText || !els.gpsModalHint) return;
+    const denied = reason === 'denied';
+    els.gpsModalText.textContent = denied
+      ? '浏览器没有允许定位权限，摇摇车现在只能用滑杆 / 巡航模拟车速。'
+      : '摇摇车要跟着真实车速摇，需要浏览器的定位权限。';
+    els.gpsModalHint.textContent = denied
+      ? '请在地址栏左侧的站点图标里把「位置」设为允许，再点「重新请求定位」；车机浏览器如果没有站点设置，可到系统设置里允许浏览器的定位权限。'
+      : '如果没看到授权弹窗，请点地址栏左侧的站点图标 → 把「位置」设为允许，然后再点「重新请求定位」。';
+  }
+
+  function showGpsModal(reason = 'denied') {
+    if (!els.gpsModal || state.gpsModalDismissed || state.gpsAutoDisabled) return;
+    updateGpsModalText(reason);
+    if (!els.gpsModal.hidden) return;
+    state.gpsModalShown = true;
+    els.gpsModal.hidden = false;
+    document.body.style.overflow = 'hidden';
+    if (els.gpsRetryBtn) { try { els.gpsRetryBtn.focus({ preventScroll: true }); } catch (_) { /* ignore */ } }
+  }
+
+  function closeGpsModal(dismissed = false) {
+    if (!els.gpsModal || els.gpsModal.hidden) return;
+    els.gpsModal.hidden = true;
+    document.body.style.overflow = '';
+    if (dismissed) {
+      state.gpsModalDismissed = true;
+      state.gpsUserOff = true;
+    }
+  }
+
+  function retryGpsPermission() {
+    state.gpsUserOff = false;
+    state.gpsModalDismissed = false;
+    startGps({ reason: 'retry' });
+    if (els.gpsModalHint) {
+      els.gpsModalHint.textContent = '已重新发起请求：请在浏览器弹窗里允许定位；如果仍然没有弹窗，请到站点设置里手动把「位置」改为允许。';
+    }
+  }
+
+  function initGpsModal() {
+    if (!els.gpsModal) return;
+    if (els.gpsClose) els.gpsClose.addEventListener('click', () => closeGpsModal(true));
+    if (els.gpsSkipBtn) els.gpsSkipBtn.addEventListener('click', () => {
+      closeGpsModal(true);
+      toast('已切换为滑杆 / 巡航模拟；想用 GPS 时点左上角「GPS」');
+    });
+    if (els.gpsRetryBtn) els.gpsRetryBtn.addEventListener('click', retryGpsPermission);
+    els.gpsModal.addEventListener('click', (ev) => {
+      if (ev.target === els.gpsModal) closeGpsModal(true);
+    });
+  }
+
   async function initGpsAuto() {
-    if (state.gpsAutoDisabled) { renderGps(); return; }
+    if (state.gpsAutoDisabled) {
+      renderGps();
+      if (els.sourceNote) els.sourceNote.textContent = '车速来源：滑杆模拟 / 巡航；GPS 自动请求已关闭（?gps=0），可手动点左上角「GPS」。';
+      return;
+    }
+    if (!window.isSecureContext || !('geolocation' in navigator)) {
+      renderGps();
+      return;
+    }
     let perm = null;
     if (navigator.permissions && navigator.permissions.query) {
       try { perm = await navigator.permissions.query({ name: 'geolocation' }); } catch (_) { perm = null; }
@@ -563,26 +637,41 @@
         perm.addEventListener('change', () => {
           state.gpsPermission = perm.state;
           if (perm.state === 'granted') {
+            if (state.gpsPromptTimer) { window.clearTimeout(state.gpsPromptTimer); state.gpsPromptTimer = null; }
             state.gpsKeep = true;
-            if (!state.gpsUserOff && !state.gpsActive && !state.autoCruise) startGps({ auto: true });
+            state.gpsUserOff = false;
+            state.gpsModalDismissed = false;
+            closeGpsModal(false);
+            if (!state.gpsActive && !state.autoCruise) startGps({ auto: true, reason: 'granted' });
+          } else if (perm.state === 'denied') {
+            state.gpsPermission = 'denied';
+            showGpsModal('denied');
           }
           renderGps();
         });
       } catch (_) { /* 老浏览器忽略 */ }
     }
-    const autoStart = state.gpsPermission === 'granted'
-      || (state.gpsPermission === 'unknown' && state.gpsWorked);
-    if (autoStart && !state.gpsUserOff && !state.autoCruise) {
+    if (state.gpsPermission === 'granted') {
       state.gpsKeep = true;
-      startGps({ auto: true });
-    } else {
-      renderGps();
-      if (els.sourceNote) {
-        els.sourceNote.textContent = state.gpsPermission === 'denied'
-          ? '车速来源：滑杆模拟 / 巡航；定位权限被拒绝，可在浏览器站点设置中允许后重试。'
-          : '车速来源：滑杆模拟 / 巡航；点左上角「GPS」开启定位测速。';
-      }
+      startGps({ auto: true, reason: 'granted' });
+      return;
     }
+    if (state.gpsPermission === 'denied') {
+      renderGps();
+      showGpsModal('denied');
+      return;
+    }
+    // prompt / unknown：加载完立即请求定位权限（触发浏览器授权弹窗）
+    state.gpsPromptRequested = true;
+    startGps({ auto: true, reason: 'prompt' });
+    // 若浏览器没有弹出授权框 / 迟迟没有结果，仍然弹页面提示窗
+    if (state.gpsPromptTimer) window.clearTimeout(state.gpsPromptTimer);
+    state.gpsPromptTimer = window.setTimeout(() => {
+      state.gpsPromptTimer = null;
+      if (state.gpsModalDismissed || state.gpsUserOff || state.gpsAutoDisabled) return;
+      if (state.gpsFixCount > 0 || state.gpsPermission === 'granted') return;
+      showGpsModal(state.gpsPermission === 'denied' ? 'denied' : 'prompt');
+    }, 8000);
   }
 
   function toggleGps() {
@@ -596,7 +685,7 @@
     startGps();
   }
 
-  function startGps({ auto = false } = {}) {
+  function startGps({ auto = false, reason = 'manual' } = {}) {
     if (state.gpsActive) return;
     if (!('geolocation' in navigator)) {
       state.gpsPermission = 'denied';
@@ -631,11 +720,16 @@
       toast('定位开启失败，请检查浏览器权限');
       return;
     }
-    els.sourceNote.textContent = auto
-      ? '检测到定位权限，已自动开启 GPS 测速…'
-      : '正在等待定位授权…（真车需在车机浏览器允许定位）';
+    const waitingText = reason === 'prompt'
+      ? '正在请求定位权限…请在浏览器弹窗里允许，之后车速会跟随 GPS'
+      : reason === 'retry'
+        ? '已重新请求定位权限，请在浏览器弹窗里允许…'
+        : auto
+          ? '已获得定位权限，正在开启 GPS 测速…'
+          : '正在等待定位授权…（真车需在车机浏览器允许定位）';
+    els.sourceNote.textContent = waitingText;
     els.sourceNote.classList.remove('is-live');
-    if (!auto) toast('📡 已请求定位：允许后车速将自动跟随 GPS');
+    if (!auto && reason !== 'retry') toast('📡 已请求定位：允许后车速将自动跟随 GPS');
   }
 
   function stopGps(keepNote = false) {
@@ -684,7 +778,9 @@
     saveGpsWorked();
     if (state.gpsFixCount === 1) {
       state.gpsKeep = true;
+      if (state.gpsPromptTimer) { window.clearTimeout(state.gpsPromptTimer); state.gpsPromptTimer = null; }
       if (state.gpsPermission !== 'denied') state.gpsPermission = 'granted';
+      closeGpsModal(false);
       els.speedSource.textContent = gpsSourceText();
       renderGps();
     }
@@ -731,11 +827,13 @@
   function onGpsError(error) {
     if (!state.gpsActive) return;
     if (error.code === 1) {
+      if (state.gpsPromptTimer) { window.clearTimeout(state.gpsPromptTimer); state.gpsPromptTimer = null; }
       state.gpsPermission = 'denied';
       state.gpsUserOff = true;
       stopGps();
       renderGps();
-      toast('定位权限被拒绝，可在浏览器站点设置里允许后重试');
+      showGpsModal('denied');
+      toast('定位权限被拒绝，可在弹窗里按提示重新允许');
       return;
     }
     state.gpsErrorCount += 1;
@@ -967,7 +1065,12 @@
       if (!audio.paused) audio.pause();
     });
     document.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Escape' && !els.aboutModal.hidden) closeAbout();
+      const gpsOpen = !!els.gpsModal && !els.gpsModal.hidden;
+      if (ev.key === 'Escape') {
+        if (!els.aboutModal.hidden) closeAbout();
+        else if (gpsOpen) closeGpsModal(true);
+      }
+      if (!els.aboutModal.hidden || gpsOpen) return;
       if (ev.target && /INPUT|SELECT|TEXTAREA/.test(ev.target.tagName)) return;
       if (ev.code === 'Space') {
         ev.preventDefault();
@@ -1099,7 +1202,8 @@
 
     initDebugPanel();
 
-    // GPS：有定位权限就自动开启并保持；没权限不主动弹窗，点按钮再申请（?gps=0 可关闭）
+    // GPS：加载完就请求权限；有权限自动保持，没权限弹窗提示（?gps=0 可关闭自动逻辑）
+    initGpsModal();
     initGpsAuto();
   }
 

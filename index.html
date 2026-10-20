@@ -7,7 +7,7 @@
 <title>NOMI 摇摇车 · 投币开摇（蔚来车机 16:9 / 9:10）</title>
 <meta name="description" content="蔚来车机摇摇车：投币开摇，摇动速度随车速变化，MP3 原声按车速变速，不玩了就回家。" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230a63d8'/%3E%3Ccircle cx='32' cy='26' r='13' fill='%23fff'/%3E%3Ccircle cx='27' cy='25' r='3' fill='%230a63d8'/%3E%3Ccircle cx='37' cy='25' r='3' fill='%230a63d8'/%3E%3Cpath d='M25 32c4 4 10 4 14 0' stroke='%230a63d8' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3Crect x='12' y='42' width='40' height='12' rx='6' fill='%23ffd166' stroke='%2317223f' stroke-width='3'/%3E%3C/svg%3E" />
-<link rel="stylesheet" href="style.css?v=20261020-3" />
+<link rel="stylesheet" href="style.css?v=20261020-4" />
 </head>
 <body class="app-body phase-idle">
   <div class="app">
@@ -71,9 +71,30 @@
           </div>
 
           <div class="ride-machine-wrap">
-            <span class="ride-ground-shadow" aria-hidden="true"></span>
-            <div class="ride-bounce">
-              <img class="ride-machine" src="assets/nomi-car.webp" alt="一辆蔚来主题的卡通小汽车，会随车速摇动" draggable="false" />
+            <div class="ride-base" aria-hidden="true">
+              <span class="ride-base-label">NIO 摇摇车</span>
+            </div>
+
+            <div class="ride-car-area">
+              <span class="ride-spring ride-spring-left" aria-hidden="true"></span>
+              <span class="ride-spring ride-spring-right" aria-hidden="true"></span>
+
+              <div class="ride-fx" aria-hidden="true">
+                <span class="ride-note ride-note-1">♪</span>
+                <span class="ride-note ride-note-2">♫</span>
+                <span class="ride-note ride-note-3">♬</span>
+                <span class="ride-star ride-star-a">✦</span>
+                <span class="ride-star ride-star-b">✦</span>
+                <span class="ride-star ride-star-c">★</span>
+              </div>
+
+              <div class="ride-bounce">
+                <div class="car-shell">
+                  <img class="ride-machine" src="assets/nomi-car.webp" alt="一辆蔚来主题的卡通小汽车，会随车速摇动" draggable="false" />
+                  <img class="wheel-spin wheel-front" src="assets/nomi-car-wheel-front.webp" alt="" aria-hidden="true" draggable="false" />
+                  <img class="wheel-spin wheel-back" src="assets/nomi-car-wheel-rear.webp" alt="" aria-hidden="true" draggable="false" />
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -193,13 +214,29 @@
         <p>MP3 使用浏览器保调变速（preservesPitch）：只变节奏、不变调，避免“花栗鼠音”。</p>
 
         <h3>🛰️ 车速从哪来？</h3>
-        <p>浏览器不能直接读取车辆 CAN 车速，页面提供三种方式：滑杆/自动巡航模拟；GPS 定位测速（需 HTTPS 或 localhost 并授权定位，已有定位权限时页面会自动保持 GPS 开启，也可点左上角「GPS」按钮手动开关）；原生车机可调 <code>NOMI_YAOYAOCHE.setSpeed(kmh)</code> 注入真实车速。</p>
+        <p>浏览器不能直接读取车辆 CAN 车速，页面提供三种方式：滑杆/自动巡航模拟；GPS 定位测速（需 HTTPS 或 localhost）。页面加载时会主动请求定位权限；已授权时自动保持 GPS 开启，没权限时会弹窗提示；也可点左上角「GPS」按钮手动开关。原生车机可调 <code>NOMI_YAOYAOCHE.setSpeed(kmh)</code> 注入真实车速。</p>
 
         <h3>🎵 素材 &amp; 比例</h3>
         <p>MP3 由用户提供：《家庭礼貌称呼歌》《宝贝宝贝（贝瓦儿歌）》，版权归原权利人，本页仅本地播放演示。布局已适配 16:9 横屏与 9:10 竖屏，其他比例自动回退为可滚动布局。</p>
 
         <h3>📢 免责</h3>
         <p>非蔚来官方产品，与蔚来无隶属关系；驾驶中请勿操作中控屏，所有操作交给副驾或停车后进行；音量请控制在「车里很欢乐、隔壁听不见」的范围。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- GPS 权限提示 -->
+  <div class="modal" id="gpsModal" hidden>
+    <div class="modal-card gps-modal-card" role="dialog" aria-modal="true" aria-labelledby="gpsTitle">
+      <button class="modal-close" id="gpsClose" type="button" aria-label="关闭">×</button>
+      <h2 id="gpsTitle">📡 开启定位权限</h2>
+      <div class="modal-body">
+        <p id="gpsModalText">摇摇车要跟着真实车速摇，需要浏览器的定位权限。</p>
+        <p class="gps-modal-tip" id="gpsModalHint">如果没看到授权弹窗，请点地址栏左侧的站点图标 → 把「位置」设为允许，然后再点「重新请求定位」。</p>
+        <div class="gps-modal-actions">
+          <button class="mini-btn gps-modal-retry" id="gpsRetryBtn" type="button">重新请求定位</button>
+          <button class="mini-btn gps-modal-skip" id="gpsSkipBtn" type="button">先用滑杆模拟</button>
+        </div>
       </div>
     </div>
   </div>
@@ -222,6 +259,6 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="app.js?v=20261020-3" defer></script>
+  <script src="app.js?v=20261020-4" defer></script>
 </body>
 </html>
