@@ -7,7 +7,7 @@
 <title>NOMI 摇摇车 · 投币开摇（蔚来车机 16:9 / 9:10）</title>
 <meta name="description" content="蔚来车机摇摇车：投币开摇，摇动速度随车速变化，MP3 原声按车速变速，不玩了就回家。" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230a63d8'/%3E%3Ccircle cx='32' cy='26' r='13' fill='%23fff'/%3E%3Ccircle cx='27' cy='25' r='3' fill='%230a63d8'/%3E%3Ccircle cx='37' cy='25' r='3' fill='%230a63d8'/%3E%3Cpath d='M25 32c4 4 10 4 14 0' stroke='%230a63d8' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3Crect x='12' y='42' width='40' height='12' rx='6' fill='%23ffd166' stroke='%2317223f' stroke-width='3'/%3E%3C/svg%3E" />
-<link rel="stylesheet" href="style.css?v=20261020-2" />
+<link rel="stylesheet" href="style.css?v=20261020-3" />
 </head>
 <body class="app-body phase-idle">
   <div class="app">
@@ -63,67 +63,19 @@
           <p class="coin-usage" id="usageLine">本机已被打开 <b id="usageOpens">0</b> 次 · 摇过 <b id="usageRides">0</b> 次 · 今日 <b id="usageToday">0</b> 次</p>
         </div>
 
-        <!-- 已投币：摇摇车 + 停止按钮 -->
+        <!-- 已投币：摇摇车 -->
         <div class="ride-live" id="rideLive">
           <div class="nomi-bubble">
             <span class="nomi-mini"><i></i><i></i></span>
             <p id="nomiLine">NOMI：投币成功，我要开始摇啦！</p>
           </div>
 
-          <svg class="ride-machine" viewBox="0 0 560 400" role="img" aria-label="一辆蔚来主题的卡通摇摇车，会随车速摇动">
-            <ellipse class="ride-shadow" cx="280" cy="372" rx="200" ry="18" />
-            <path class="ride-base" d="M78 336h404l12 24H66z" />
-            <g class="ride-bounce">
-              <path class="ride-spring" d="M162 336c0-14 18-14 18 0s18 14 18 0 18-14 18 0" />
-              <path class="ride-spring" d="M344 336c0-14 18-14 18 0s18 14 18 0 18-14 18 0" />
-
-              <!-- 车体 -->
-              <path class="ride-body" d="M92 250c-8-30 6-54 34-64l78-26c26-26 62-40 102-40 46 0 84 16 112 44l62 20c24 8 38 30 34 56l-8 34c-3 14-15 24-30 24H124c-16 0-29-11-32-26l-6-22z" />
-              <path class="ride-roof" d="M206 160c22-22 52-34 86-34 38 0 70 13 94 36l-180-2z" />
-              <path class="ride-window" d="M232 162c18-16 42-24 68-24 30 0 55 9 74 26l-142-2z" />
-              <path class="ride-window-side" d="M404 158l52 18c16 6 26 20 24 36l-76-54z" />
-              <path class="ride-highlight" d="M118 236c-4-18 4-32 22-39l52-18" />
-
-
-              <!-- NOMI 脸 -->
-              <g class="nomi-face">
-                <rect x="150" y="172" width="62" height="52" rx="16" />
-                <circle class="nomi-eye" cx="171" cy="195" r="5" />
-                <circle class="nomi-eye" cx="193" cy="195" r="5" />
-                <path class="nomi-smile" d="M170 208c6 6 18 6 24 0" />
-                <circle class="nomi-blush" cx="161" cy="205" r="4" />
-                <circle class="nomi-blush" cx="203" cy="205" r="4" />
-              </g>
-
-              <!-- NIO 标 + 投币口 -->
-              <circle class="ride-logo" cx="330" cy="252" r="17" />
-              <text class="ride-logo-text" x="330" y="257" text-anchor="middle">NIO</text>
-              <g class="coin-panel">
-                <rect class="coin-slot" x="236" y="240" width="52" height="30" rx="9" />
-                <rect class="coin-slot-line" x="258" y="248" width="6" height="14" rx="3" />
-                <text class="coin-slot-label" x="262" y="262" text-anchor="middle">投币</text>
-              </g>
-
-              <!-- 轮子 -->
-              <g class="wheel wheel-front">
-                <circle cx="168" cy="302" r="34" />
-                <circle class="wheel-inner" cx="168" cy="302" r="16" />
-                <path class="wheel-spoke" d="M168 270v64M136 302h64M145 279l46 46M191 279l-46 46" />
-              </g>
-              <g class="wheel wheel-back">
-                <circle cx="424" cy="302" r="34" />
-                <circle class="wheel-inner" cx="424" cy="302" r="16" />
-                <path class="wheel-spoke" d="M424 270v64M392 302h64M401 279l46 46M447 279l-46 46" />
-              </g>
-
-              <path class="sparkle" d="M470 136l6 16 16 6-16 6-6 16-6-16-16-6 16-6z" />
-              <path class="sparkle sparkle-b" d="M120 132l4 11 11 4-11 4-4 11-4-11-11-4 11-4z" />
-              <text class="float-note note-1" x="486" y="172">♪</text>
-              <text class="float-note note-2" x="104" y="192">♫</text>
-              <text class="float-note note-3" x="506" y="236">♬</text>
-              <text class="ride-base-label" x="280" y="355" text-anchor="middle">NIO 摇摇车</text>
-            </g>
-          </svg>
+          <div class="ride-machine-wrap">
+            <span class="ride-ground-shadow" aria-hidden="true"></span>
+            <div class="ride-bounce">
+              <img class="ride-machine" src="assets/nomi-car.webp" alt="一辆蔚来主题的卡通小汽车，会随车速摇动" draggable="false" />
+            </div>
+          </div>
         </div>
       </section>
 
@@ -270,6 +222,6 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="app.js?v=20261020-2" defer></script>
+  <script src="app.js?v=20261020-3" defer></script>
 </body>
 </html>

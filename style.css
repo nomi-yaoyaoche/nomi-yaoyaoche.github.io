@@ -287,17 +287,41 @@ body.app-body {
 }
 .phase-riding .ride-live { display: flex; }
 .phase-riding .coin-stage { display: none; }
+/* 摇摇车图片：透明 WebP，随播放状态整体摇晃 */
+.ride-machine-wrap {
+  position: relative;
+  width: 100%; height: 100%;
+  min-height: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.ride-bounce {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  transform-origin: 50% 92%;
+}
 .ride-machine {
   display: block;
-  width: 100%; max-width: 760px;
-  max-height: 100%;
-  overflow: visible;
-  filter: drop-shadow(0 16px 16px rgba(23, 34, 63, 0.14));
+  width: 100%; height: 100%;
+  max-width: 90%; max-height: 90%;
+  object-fit: contain;
+  object-position: center bottom;
+  filter: drop-shadow(0 18px 18px rgba(23, 34, 63, 0.16));
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
 }
-.ride-bounce { transform-origin: 280px 352px; }
+.ride-ground-shadow {
+  position: absolute;
+  left: 50%; bottom: 1.5%;
+  width: min(70%, 760px);
+  height: clamp(10px, 2.6vh, 26px);
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(23, 34, 63, 0.22), rgba(23, 34, 63, 0.05) 62%, transparent 74%);
+  pointer-events: none;
+}
 .is-playing .ride-bounce { animation: rideRock var(--rock-duration, 1.5s) ease-in-out infinite; }
-.is-playing .wheel { animation: spin var(--wheel-duration, 0.9s) linear infinite; transform-box: fill-box; transform-origin: center; }
-.is-playing .ride-shadow { animation: shadowPulse var(--rock-duration, 1.5s) ease-in-out infinite; }
+.is-playing .ride-ground-shadow { animation: shadowPulse var(--rock-duration, 1.5s) ease-in-out infinite; }
 
 .ride-shadow { fill: rgba(23, 34, 63, 0.16); }
 .ride-base { fill: var(--yellow); stroke: var(--ink); stroke-width: 6; stroke-linejoin: round; }
@@ -575,7 +599,7 @@ body.app-body {
   .ride-head { gap: clamp(9px, 1vw, 14px); }
   .ride-speed-hint { display: none; }
   .ride-head .stop-btn { margin-left: auto; }
-  .ride-machine { max-width: min(100%, 1000px); max-height: 100%; }
+  .ride-machine { max-width: min(90%, 1000px); max-height: 90%; }
 
   /* 信息栏：和选歌栏等高，数字与按钮加大 */
   .info-board {
@@ -663,7 +687,7 @@ body.app-body {
   .ride-stage { padding: 8px 14px 12px; }
   .ride-head { row-gap: 4px; }
   .ride-head .stop-btn { font-size: clamp(13px, 1.35vw, 16px); padding: clamp(8px, 1.1vh, 12px) clamp(12px, 1.3vw, 18px); }
-  .ride-machine { max-width: min(100%, 820px); max-height: 100%; }
+  .ride-machine { max-width: min(90%, 820px); max-height: 90%; }
   .info-board { padding: 5px 14px 7px; }
   .info-board .sim-note { display: none; }
   .panel-head { margin-bottom: 1px; }
