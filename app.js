@@ -25,14 +25,14 @@
       durationLabel: '2:44',
       nomi: 'NOMI：原创主题曲《NOMI 摇摇车》已就位，投币就开摇！'
     },
-    baby: {
-      id: 'baby',
-      title: '宝贝宝贝',
-      subtitle: '贝瓦儿歌 · 哄娃专用',
-      emoji: '🍼',
-      src: 'assets/baobei-baobei.mp3',
-      durationLabel: '3:31',
-      nomi: 'NOMI：哄娃神曲已就位，摇得越慢越温柔。'
+    cheche: {
+      id: 'cheche',
+      title: '爸爸的车车叫什么',
+      subtitle: '用户提供 · 车车问答',
+      emoji: '🚙',
+      src: 'assets/baba-de-cheche-jiao-shenme.mp3',
+      durationLabel: '3:06',
+      nomi: 'NOMI：新歌《爸爸的车车叫什么》已就位，投币就开摇！'
     }
   };
 
@@ -123,6 +123,7 @@
       if (Number.isFinite(data.safeBottom)) state.safeBottom = clamp(Math.round(data.safeBottom), 0, 240);
       if (data.gpsWorked === true) state.gpsWorked = true;
       if (data.selectedSongId === 'family') data.selectedSongId = 'nomi'; // 兼容旧缓存
+      if (data.selectedSongId === 'baby') data.selectedSongId = 'cheche'; // 兼容旧缓存
       if (data.selectedSongId && SONGS[data.selectedSongId]) state.selectedSongId = data.selectedSongId;
       if (data.usage && typeof data.usage === 'object') {
         ['opens', 'opensToday', 'rides', 'ridesToday'].forEach((key) => {
@@ -1179,6 +1180,7 @@
       setSpeed(kmh) { setSpeed(kmh); },
       play(songId) {
         if (songId === 'family') songId = 'nomi'; // 兼容旧调用
+        if (songId === 'baby') songId = 'cheche'; // 兼容旧调用
         if (songId && SONGS[songId]) state.selectedSongId = songId;
         renderSong();
         if (state.phase === 'riding') startAudio();
