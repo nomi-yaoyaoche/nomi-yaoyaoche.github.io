@@ -4,5 +4,5 @@
 
 - 在线体验：https://nomi-yaoyaoche.github.io/
 - 备用：https://lzyxczw-cyber.github.io/nio-yaoyaoche/
-- 车机适配：GPS 开关在摇摇车左上角，已有定位权限时自动开启并保持；浏览器上下栏遮挡页面时，用 `?debug=1` 的「底部安全区」或 `?safe=60` 补偿。
+- 车机适配：GPS 开关在摇摇车左上角，已有定位权限时自动开启并保持；触屏/Android 车机默认自动补偿底部安全区 72px，可在 `?debug=1` 调试面板里调整，或用 `?safe=72` 指定。
 - 非蔚来官方作品；NIO / NOMI 商标归蔚来所有。

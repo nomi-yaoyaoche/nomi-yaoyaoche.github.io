@@ -642,7 +642,7 @@ body.app-body {
     flex: 1 1 auto; min-height: 0;
     display: grid;
     grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
     grid-template-areas: "ride info" "ride songs";
     gap: clamp(10px, 1.1vw, 16px);
     padding: clamp(5px, 0.8vh, 9px) 0;
@@ -663,7 +663,7 @@ body.app-body {
     gap: clamp(2px, 0.5vh, 6px);
   }
   .info-board .panel-head { margin-bottom: clamp(2px, 0.5vh, 6px); }
-  .info-board .metric-row { flex: 1 1 auto; align-items: center; padding: 0; }
+  .info-board .metric-row { flex: 0 0 auto; align-items: center; padding: 0; }
   .info-board .metric-value b { font-size: clamp(46px, 8.6vh, 100px); }
   .info-board .metric-rate .metric-value b { font-size: clamp(38px, 7.2vh, 84px); }
   .info-board .metric-label { font-size: clamp(10px, 1.1vh, 14px); }
@@ -674,7 +674,7 @@ body.app-body {
   .info-board .loop-chip { font-size: clamp(9px, 1.05vh, 11px); }
   .info-board .progress { height: clamp(8px, 1.15vh, 13px); margin: clamp(4px, 0.9vh, 9px) 0 clamp(2px, 0.5vh, 5px); }
   .info-board .time-row { font-size: clamp(10px, 1.05vh, 12px); }
-  .info-board .speed-controls { margin-top: auto; padding-top: clamp(5px, 1vh, 10px); }
+  .info-board .speed-controls { margin-top: clamp(4px, 0.8vh, 10px); padding-top: clamp(5px, 1vh, 10px); }
   .info-board .speed-range { height: clamp(24px, 3.4vh, 38px); margin-bottom: clamp(3px, 0.8vh, 8px); }
   .info-board .speed-actions { gap: clamp(8px, 1vw, 14px); }
   .info-board .speed-actions .mini-btn {
@@ -731,7 +731,7 @@ body.app-body {
     flex: 1 1 auto; min-height: 0;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 2.15fr) auto minmax(0, 0.5fr);
+    grid-template-rows: minmax(0, 2fr) auto minmax(0, 0.55fr);
     gap: clamp(6px, 0.8vh, 9px);
     padding: 6px 0;
     align-items: stretch;

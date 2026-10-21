@@ -88,6 +88,7 @@
     gpsPromptRequested: false,
     gpsPromptTimer: null,
     safeBottom: 0,            // 车机浏览器底部遮挡补偿（px）
+    safeBottomUserSet: false, // 用户是否手动设置过（手动值优先）
     walkMode: false,
     walkFactor: 25,
     rateTimer: null,
@@ -120,7 +121,10 @@
       if (Number.isFinite(data.coins)) state.coins = data.coins;
       if (Number.isFinite(data.volume)) state.volume = clamp(data.volume, 0, 1);
       if (Number.isFinite(data.speed)) state.speed = clamp(data.speed, SPEED_MIN, SPEED_MAX);
-      if (Number.isFinite(data.safeBottom)) state.safeBottom = clamp(Math.round(data.safeBottom), 0, 240);
+      if (Number.isFinite(data.safeBottom)) {
+        state.safeBottom = clamp(Math.round(data.safeBottom), 0, 240);
+        state.safeBottomUserSet = data.safeBottomUserSet === true || data.safeBottom > 0;
+      }
       if (data.gpsWorked === true) state.gpsWorked = true;
       if (data.selectedSongId === 'family') data.selectedSongId = 'nomi'; // 兼容旧缓存
       if (data.selectedSongId === 'baby') data.selectedSongId = 'cheche'; // 兼容旧缓存
@@ -143,6 +147,7 @@
         speed: state.speed,
         selectedSongId: state.selectedSongId,
         safeBottom: state.safeBottom,
+        safeBottomUserSet: state.safeBottomUserSet,
         gpsWorked: state.gpsWorked,
         usage: state.usage
       }));
@@ -559,6 +564,16 @@
     document.documentElement.style.setProperty('--car-safe-bottom', Math.max(0, Math.round(state.safeBottom)) + 'px');
   }
 
+  function detectDefaultSafeBottom() {
+    const wide = window.matchMedia('(min-aspect-ratio: 5/4) and (min-height: 600px) and (min-width: 900px)').matches;
+    const portrait = window.matchMedia('(max-aspect-ratio: 5/4) and (min-height: 760px) and (min-width: 720px)').matches;
+    if (!wide && !portrait) return 0;
+    const touch = window.matchMedia('(pointer: coarse)').matches
+      || navigator.maxTouchPoints > 0
+      || /Android|HarmonyOS/i.test(navigator.userAgent || '');
+    return touch ? 72 : 0;
+  }
+
   function saveGpsWorked() {
     if (state.gpsWorked) return;
     state.gpsWorked = true;
@@ -964,6 +979,7 @@
         const value = Math.round(Number(els.safeBottomInput.value));
         if (Number.isFinite(value) && value >= 0 && value <= 240) {
           state.safeBottom = value;
+          state.safeBottomUserSet = true;
           applySafeBottom();
           saveStore();
           renderDebugPanel();
@@ -974,6 +990,10 @@
       });
     }
     window.addEventListener('resize', () => {
+      if (!state.safeBottomUserSet) {
+        state.safeBottom = detectDefaultSafeBottom();
+        applySafeBottom();
+      }
       if (!els.debugPanel.hidden) renderDebugPanel();
     });
     try {
@@ -1119,8 +1139,13 @@
       const safe = Number(params.get('safe'));
       if (Number.isFinite(safe) && safe >= 0 && safe <= 240) {
         state.safeBottom = Math.round(safe);
+        state.safeBottomUserSet = true;
         saveStore();
       }
+    }
+    if (!state.safeBottomUserSet) {
+      state.safeBottom = detectDefaultSafeBottom();
+      saveStore();
     }
     applySafeBottom();
     if (params && params.get('walk') !== null) {
@@ -1199,6 +1224,7 @@
         const value = Number(px);
         if (Number.isFinite(value) && value >= 0 && value <= 240) {
           state.safeBottom = Math.round(value);
+          state.safeBottomUserSet = true;
           applySafeBottom();
           saveStore();
         }
