@@ -198,6 +198,7 @@
     els.aboutModal = $('#aboutModal');
     els.aboutClose = $('#aboutClose');
     els.toast = $('#toast');
+    els.fsBtn = $('#fsBtn');
     els.debugPanel = $('#debugPanel');
     els.debugBody = $('#debugBody');
     els.debugClose = $('#debugClose');
@@ -874,6 +875,41 @@
   }
 
   /* ------------------------------------------------------------------ *
+   * 7.4 全屏（浏览器支持 Fullscreen API 时隐藏地址栏/工具栏）
+   * ------------------------------------------------------------------ */
+  function isFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+  }
+
+  function updateFsUi() {
+    if (!els.fsBtn) return;
+    const on = isFullscreen();
+    els.fsBtn.setAttribute('aria-pressed', String(on));
+    els.fsBtn.textContent = on ? '⛶ 退出全屏' : '⛶ 全屏';
+  }
+
+  async function toggleFullscreen() {
+    try {
+      if (isFullscreen()) {
+        if (document.exitFullscreen) await document.exitFullscreen();
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+        updateFsUi();
+        return;
+      }
+      const el = document.documentElement;
+      const request = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (!request) {
+        toast('当前浏览器不支持网页全屏；可用 ?safe=90 调底部安全区');
+        return;
+      }
+      await request.call(el);
+      updateFsUi();
+    } catch (err) {
+      toast('浏览器拒绝全屏；可用 ?safe=90 调底部安全区');
+    }
+  }
+
+  /* ------------------------------------------------------------------ *
    * 7.5 车机调试面板（5 次点击 NIO 标，或 ?debug=1）
    * ------------------------------------------------------------------ */
   const DEBUG_MODE_WIDE = '(min-aspect-ratio: 5/4) and (min-height: 600px) and (min-width: 900px)';
@@ -898,6 +934,7 @@
       ['屏幕', window.screen.width + ' × ' + window.screen.height + ' @' + (window.devicePixelRatio || 1) + 'x'],
       ['页面高度', document.documentElement.scrollHeight + (document.documentElement.scrollHeight > window.innerHeight + 1 ? '（有滚动）' : '（一屏）')],
       ['布局模式', mode],
+      ['全屏', (document.fullscreenEnabled || document.webkitFullscreenEnabled ? '支持' : '不支持') + (isFullscreen() ? '（已全屏）' : '')],
       ['驾驶模式', debugState ? (debugState.walkMode ? '步行测试 ×' + debugState.walkFactor : '车辆模式（默认）') : '车辆模式'],
       ['安全上下文', window.isSecureContext ? '是（GPS 可用）' : '否（需 HTTPS / localhost）'],
       ['定位 API', 'geolocation' in navigator ? '支持' : '不支持'],
@@ -1037,6 +1074,9 @@
       if (state.autoCruise) setAutoCruise(false);
       setSpeed(Number(ev.target.value));
     });
+    if (els.fsBtn) els.fsBtn.addEventListener('click', toggleFullscreen);
+    document.addEventListener('fullscreenchange', updateFsUi);
+    document.addEventListener('webkitfullscreenchange', updateFsUi);
     els.gpsBtn.addEventListener('click', toggleGps);
     els.autoBtn.addEventListener('click', () => {
       const next = !state.autoCruise;
