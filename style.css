@@ -436,12 +436,17 @@ body.app-body {
 .nomi-mini i:last-child { animation-delay: 0.15s; }
 
 /* 停止按钮：放大，和 GPS 同一行放在摇摇车右上角 */
+.ride-actions {
+  display: flex; align-items: center; gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
 .stop-btn {
   position: static;
   z-index: 5;
   flex-shrink: 0;
-  margin-left: 6px;
-  display: inline-flex; align-items: center; gap: 8px;
+  margin-left: 0;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   padding: clamp(10px, 1.35vh, 15px) clamp(15px, 1.5vw, 24px);
   font-family: inherit;
   font-size: clamp(14px, 1.25vw, 19px);
@@ -455,9 +460,19 @@ body.app-body {
   transition: transform 0.12s ease, box-shadow 0.12s ease;
   white-space: nowrap;
 }
+.ride-actions .stop-btn,
+.ride-actions .fs-btn {
+  width: clamp(170px, 18vw, 230px);
+  height: clamp(48px, 5.8vh, 60px);
+  min-width: 0;
+  padding-left: 10px; padding-right: 10px;
+  justify-content: center;
+}
+.ride-actions .fs-btn { background: linear-gradient(160deg, #dff1ff, #9fd4ff); }
 .stop-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 0 var(--ink); }
 .stop-btn:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--ink); }
 .phase-idle .stop-btn { display: none; }
+.phase-idle .fs-btn { display: inline-flex; }
 
 /* 投币动画 */
 .coin-drop .coin-big { animation: coinDrop 0.42s ease-in forwards; }
@@ -653,7 +668,7 @@ body.app-body {
   .ride-stage { grid-area: ride; min-height: 0; padding: clamp(8px, 1.2vh, 14px) clamp(12px, 1.4vw, 20px); }
   .ride-head { gap: clamp(9px, 1vw, 14px); }
   .ride-speed-hint { display: none; }
-  .ride-head .stop-btn { margin-left: auto; }
+  .ride-actions { margin-left: auto; }
 
   /* 信息栏：和选歌栏等高，数字与按钮加大 */
   .info-board {
@@ -779,7 +794,7 @@ body.app-body {
   .ride-stage { min-height: 440px; }
   .ride-head { gap: 7px; row-gap: 6px; }
   .ride-speed-hint { display: none; }
-  .ride-head .stop-btn { margin-left: auto; }
+  .ride-actions { margin-left: auto; }
   .gps-btn { font-size: 12.5px; padding: 8px 12px; }
   .stop-btn { font-size: 13px; padding: 8px 13px; }
   .song-list { grid-template-columns: minmax(0, 1fr); }
